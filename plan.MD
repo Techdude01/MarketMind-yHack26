@@ -1,5 +1,5 @@
 # 🧠 MarketMind — Hackathon Plan
-> AI agent for Polymarket: monitors prediction markets, surfaces reasoning gaps, executes trades
+> AI agent for Polymarket: monitors prediction markets, surfaces reasoning gaps, and visualizes risk + payoff like a TradFi terminal
 
 ---
 
@@ -30,11 +30,19 @@ Polymarket API ──► Agent Core (LLM Reasoning Loop) ──► Trade Executo
                          │
                     MongoDB Store
                          │
-                    Hex Pipeline ──► Hex Dashboard
-                         │
+              ┌──────────┴──────────┐
+              ▼                     ▼
+        Hex Pipeline          Payoff Engine  ◄── NEW
+        (pipeline +           (P&L curves,
+         dashboarding)         scenario trees,
+              │                probability
+              │                timelines)
+              └──────────┬──────────┘
                     Flask/Node API
                          │
-                    Next.js Frontend (Three.js)
+                    Next.js Frontend
+                    ├── Hero (Three.js)
+                    └── Market Analysis View  ◄── NEW
 ```
 
 **Auth:** Auth0 (agent + user auth)
@@ -49,7 +57,8 @@ Polymarket API ──► Agent Core (LLM Reasoning Loop) ──► Trade Executo
 | **ML / Signal** | Sentiment model, news vs market divergence, prompt engineering, K2 Think V2 integration | — |
 | **Agent / Backend** | Agent loop, Polymarket API, Tavily search, trade execution, Flask or Node | — |
 | **Data / Hex** | Hex API pipeline, MongoDB schema, dashboarding, data app | — |
-| **Frontend** | Next.js UI, Three.js visuals, UX/UI polish, Auth0 integration | — |
+| **Frontend** | Next.js UI, Three.js hero, Market Analysis View, UX/UI polish, Auth0 integration | — |
+| **Quant / Payoff Engine** | P&L curves, scenario trees, probability timeline math, payoff surface calculations | — |
 | **Infra / DevOps** | GoDaddy deploy, env config, secrets, CI/CD, repo setup | — |
 
 > ⚠️ **TODO: Assign roles in first meeting. One person can own multiple if small team.**
@@ -163,7 +172,32 @@ while True:
 
 ---
 
-### MODULE 5 — Hex Data Pipeline & Dashboard
+### MODULE 4B — Payoff Engine & Market Analysis View ⭐ NEW
+**Owner:** —
+**Estimated Time:** 4–6 hrs
+**Why:** This directly addresses the judging gap — TradFi-style visualizations that help a trader reason *before* placing a trade.
+
+**Calculations to implement:**
+- [ ] P&L curve: given entry price (implied prob) + position size → payoff at YES (1.00) and NO (0.00) resolution
+- [ ] Breakeven probability: `breakeven = cost / max_payout`
+- [ ] Expected value: `EV = (agent_confidence × payout_yes) - (1 - agent_confidence) × cost`
+- [ ] Time-decay scenario: show P&L if market resolves at T+1d, T+7d, T+30d (using Polymarket historical liquidity as proxy for time risk)
+- [ ] Sensitivity table: how EV changes as true probability shifts ±5%, ±10%, ±20% from current market price
+
+**Backend route to add:**
+- [ ] `POST /api/payoff` — accepts `{ marketId, positionSize, side }` → returns payoff curve data points
+
+**Frontend: `/market/[id]` page additions (Market Analysis View):**
+- [ ] **Probability Timeline chart** — market implied prob over time (historical) + agent's estimated true prob as a horizontal line, built with Recharts or Chart.js
+- [ ] **P&L Payoff curve** — x-axis: resolution probability, y-axis: profit/loss in $, with entry price marked
+- [ ] **EV & Breakeven callout cards** — 3 stat boxes: Current Odds / Agent's True Prob / Expected Value
+- [ ] **Scenario table** — "What if the market moves to X%?" rows showing updated EV
+- [ ] **Plain-English thesis** — agent thesis displayed prominently above charts
+- [ ] **Simulate Trade button** — input size → see payoff curve update live
+
+> 💡 This single page is the demo centrepiece for the Prediction Markets prize. Make it look like a Bloomberg terminal met a startup.
+
+---
 **Owner:** —
 **Estimated Time:** 4–5 hrs
 
@@ -178,6 +212,8 @@ while True:
   - Agent confidence scores over time
   - Trade history (simulated/real)
   - News sentiment vs. market probability chart
+  - **Agent EV distribution across all flagged markets** ← new, feeds Hex prize story
+  - **Divergence leaderboard: biggest news vs. market gaps today** ← new
 - [ ] Publish Hex app + get shareable link
 - [ ] Embed Hex dashboard in Next.js frontend (iframe or Hex embed API)
 - [ ] Document Hex usage clearly for prize submission
@@ -204,23 +240,23 @@ while True:
 
 ---
 
-### MODULE 7 — Frontend (Next.js + Three.js)
+### MODULE 7 — Frontend (Next.js + Three.js hero)
 **Owner:** —
 **Estimated Time:** 6–8 hrs
 
 - [ ] Scaffold Next.js app (`create-next-app`)
 - [ ] Auth0 login/logout with `@auth0/nextjs-auth0`
 - [ ] Pages:
-  - `/` — landing / hero with Three.js globe or particle field showing live markets
-  - `/markets` — live market list with odds, agent scores
-  - `/market/[id]` — market detail, thesis, trade action
+  - `/` — **hero page only**: Three.js animated scene (floating probability nodes, particle field, or abstract market globe) — purely aesthetic, not data-driven
+  - `/markets` — live market list with odds, agent confidence scores, divergence badges
+  - `/market/[id]` — **Market Analysis View** (see Module 4B — this is the core product screen)
   - `/dashboard` — embedded Hex dashboard
-  - `/agent` — agent run log, trigger button
-- [ ] Three.js scene: market data visualized as 3D nodes/graph
-- [ ] Real-time updates via polling or WebSocket
-- [ ] Trade simulation UI: show thesis → confirm → result
-- [ ] Mobile responsive layout
-- [ ] Polish for UI/UX prize: animations, dark theme, tight spacing
+  - `/agent` — agent run log, manual trigger button
+- [ ] Three.js: hero scene only — keep scoped, don't wire to live data
+- [ ] Recharts or Chart.js: probability timeline + P&L payoff curve on `/market/[id]`
+- [ ] Real-time market list updates via polling (30s interval)
+- [ ] Trade simulation UI on market detail: input size → payoff curve updates live
+- [ ] Polish for UI/UX prize: dark theme, tight spacing, Bloomberg-terminal-meets-startup aesthetic
 
 ---
 
@@ -234,6 +270,7 @@ while True:
   - `theses` — per-market thesis (marketId, thesis_text, confidence, model_used)
   - `trades` — trade log (marketId, side, amount, simulated, outcome)
   - `signals` — ML signal scores (marketId, sentiment_score, divergence, timestamp)
+  - `payoffs` — cached payoff calculations (marketId, positionSize, side, ev, breakeven, curve_data, timestamp) ← new
 - [ ] Set up MongoDB Atlas cluster
 - [ ] Add indexes on `marketId`, `timestamp`
 - [ ] Share connection string securely (not in repo)
@@ -263,9 +300,10 @@ Hour 0–2   │ MODULE 1: Repo setup, env, roles confirmed
 Hour 2–5   │ MODULE 2: Polymarket API working + MODULE 8: MongoDB schema
 Hour 5–10  │ MODULE 3: Agent core loop (parallel with MODULE 4)
 Hour 5–10  │ MODULE 4: ML signal model (parallel with MODULE 3)
+Hour 6–12  │ MODULE 4B: Payoff Engine + Market Analysis View backend ← new, high priority
 Hour 8–12  │ MODULE 5: Hex pipeline + dashboard
-Hour 8–13  │ MODULE 6: Backend API routes
-Hour 10–18 │ MODULE 7: Frontend (can start scaffolding early)
+Hour 8–13  │ MODULE 6: Backend API routes (include /api/payoff)
+Hour 10–18 │ MODULE 7: Frontend — hero (Three.js) + Market Analysis View charts
 Hour 18–22 │ Integration: wire all modules together
 Hour 22–24 │ Polish, demo prep, submission
 ```
@@ -275,6 +313,7 @@ Hour 22–24 │ Polish, demo prep, submission
 ## 🔗 Integration Checklist (final wiring)
 
 - [ ] Frontend → Backend API (market data, agent runs)
+- [ ] Frontend → Payoff Engine API (`/api/payoff`)
 - [ ] Backend → Polymarket API
 - [ ] Backend → MongoDB
 - [ ] Agent → Tavily search
@@ -310,9 +349,10 @@ Hour 22–24 │ Polish, demo prep, submission
 - Never commit API keys — use `.env` files and add to `.gitignore` immediately
 
 ### 🎨 UI/UX Prize ($100)
-- Three.js can win this if done well — a 3D market graph where node size = market volume and color = agent confidence is visually striking
-- Prioritize: clear thesis display, confidence score visualization, one-click trade simulation
-- Dark theme + real-time data updates = strong demo impression
+- Three.js is **hero page only** — animated floating nodes or particle field, purely aesthetic. Don't wire to live data; keep it fast and stunning.
+- The real UX prize is won on `/market/[id]` — the Market Analysis View. Think Bloomberg terminal meets a startup: dark, dense with info, but instantly readable.
+- Prioritize: P&L curve clarity, EV callout cards, thesis readability, one-click trade simulation
+- Dark theme + real-time chart updates = strong demo impression
 
 ### 📡 Data Pipeline Risks
 - Polymarket API rate limits — implement throttling from day 1
@@ -321,10 +361,11 @@ Hour 22–24 │ Polish, demo prep, submission
 - MongoDB Atlas free tier may have connection limits — check before scaling
 
 ### 🧪 Demo Strategy
-- Have 3–5 pre-selected markets loaded with pre-run theses as fallback if live agent is slow
-- Show the full loop: market → search → reasoning → thesis → simulated trade
+- **Lead with the Market Analysis View** (`/market/[id]`) — this is what judges want to see. Walk through: market odds → agent thesis → P&L curve → EV callout → simulate trade.
+- Have 3–5 pre-selected markets with pre-run theses as fallback if live agent is slow
+- Show the full agent loop once: market → search → reasoning → thesis → populates the analysis view
 - Judges love seeing real data — use real Polymarket markets, real news
-- Prepare a 2-minute pitch: problem → solution → demo → tech stack → prizes targeted
+- Prepare a 2-minute pitch: problem → solution → demo (analysis view) → tech stack → prizes targeted
 
 ### 🤝 Team Coordination
 - Daily (or per-session) sync: what's blocked, what's done, what's next
