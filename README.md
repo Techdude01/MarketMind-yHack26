@@ -25,7 +25,7 @@ Monorepo with a Next.js frontend, Flask API, and PostgreSQL, orchestrated with D
 
    - **Frontend:** [http://localhost:3000](http://localhost:3000) — use the buttons to call the API.
    - **Backend:** [http://localhost:5000/health](http://localhost:5000/health)
-   - **Postgres:** `localhost:5432` (credentials match `.env`)
+  - **Postgres:** `localhost:5433` (credentials match `.env`)
 
 ## Verify database read/write
 
@@ -41,6 +41,27 @@ Monorepo with a Next.js frontend, Flask API, and PostgreSQL, orchestrated with D
 ## Data persistence
 
 Postgres files live in the Docker named volume `postgres_data`. Removing containers does not remove this volume unless you run `docker compose down -v`.
+
+## Connect Hex to local Postgres (ngrok TCP tunnel)
+
+1. Verify ngrok account can open TCP endpoints:
+   - If `ERR_NGROK_8013` appears, complete account verification at [ngrok dashboard](https://dashboard.ngrok.com/settings#id-verification).
+2. Start postgres + tunnel:
+
+   ```bash
+   ./scripts/start-hex-ngrok.sh
+   ```
+
+3. Use printed values in Hex connection settings:
+   - Name: `Local Docker Postgres`
+   - Host: `<ngrok host>`
+   - Port: `<ngrok port>`
+   - Database/Username/Password: read from `.env`
+4. Stop tunnel when finished:
+
+   ```bash
+   ./scripts/stop-hex-ngrok.sh
+   ```
 
 ## Project layout
 
