@@ -1,2 +1,9 @@
 .env
 .brv
+
+# Python cache — all depths
+**/__pycache__/
+**/*.py[cod]
+
+# Pytest cache — all depths
+**/.pytest_cache/

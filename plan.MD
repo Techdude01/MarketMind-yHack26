@@ -1,6 +1,5 @@
 # 🧠 MarketMind — Hackathon Plan
-> AI agent for Polymarket: monitors prediction markets, surfaces reasoning gaps, and visualizes risk + payoff like a TradFi terminal
-
+> AI agent for Polymarket: monitors prediction markets, surfaces reasoning s
 ---
 
 ## 🏆 Prize Targets
@@ -28,23 +27,27 @@ Polymarket API ──► Agent Core (LLM Reasoning Loop) ──► Trade Executo
                     Signal Model
                  (sentiment, news vs market)
                          │
-                    MongoDB Store
-                         │
               ┌──────────┴──────────┐
               ▼                     ▼
-        Hex Pipeline          Payoff Engine  ◄── NEW
-        (pipeline +           (P&L curves,
-         dashboarding)         scenario trees,
-              │                probability
-              │                timelines)
-              └──────────┬──────────┘
-                    Flask/Node API
-                         │
-                    Next.js Frontend
-                    ├── Hero (Three.js)
-                    └── Market Analysis View  ◄── NEW
+        PostgreSQL              MongoDB
+     (structured, Hex-       (unstructured:
+      facing: markets,        raw LLM output,
+      theses, signals,        Tavily dumps,
+      payoffs, trades)        agent internals)
+              │
+        Hex Pipeline + Payoff Engine
+        (P&L curves, scenario trees,
+         probability timelines)
+              │
+           Flask API
+              │
+        Next.js Frontend
+        ├── Hero (Three.js)
+        └── Market Analysis View
 ```
 
+**Backend:** Flask (Python — shared language with agent)
+**Databases:** PostgreSQL (structured, Hex-facing) + MongoDB (unstructured agent internals)
 **Auth:** Auth0 (agent + user auth)
 **Deployment:** GoDaddy
 
@@ -56,7 +59,7 @@ Polymarket API ──► Agent Core (LLM Reasoning Loop) ──► Trade Executo
 |------|-----------------|-------------|
 | **ML / Signal** | Sentiment model, news vs market divergence, prompt engineering, K2 Think V2 integration | — |
 | **Agent / Backend** | Agent loop, Polymarket API, Tavily search, trade execution, Flask or Node | — |
-| **Data / Hex** | Hex API pipeline, MongoDB schema, dashboarding, data app | — |
+| **Data / Hex** | Hex API pipeline, PostgreSQL schema + admin, dashboarding, data app | — |
 | **Frontend** | Next.js UI, Three.js hero, Market Analysis View, UX/UI polish, Auth0 integration | — |
 | **Quant / Payoff Engine** | P&L curves, scenario trees, probability timeline math, payoff surface calculations | — |
 | **Infra / DevOps** | GoDaddy deploy, env config, secrets, CI/CD, repo setup | — |
@@ -108,7 +111,7 @@ marketmind/
 - [ ] Implement simulated trade placement (paper trading)
 - [ ] Implement real trade placement (if allowed/safe)
 - [ ] Write unit tests for API wrappers
-- [ ] Store raw market snapshots to MongoDB
+- [ ] Store raw market snapshots to PostgreSQL (`markets` table)
 
 **Key endpoints to map:**
 - `GET /markets` — list active markets
@@ -132,7 +135,7 @@ marketmind/
 - [ ] Score thesis confidence (0–100)
 - [ ] Decision gate: simulate trade / place trade / skip
 - [ ] Auth0: secure agent API endpoints
-- [ ] Log all agent runs + reasoning to MongoDB
+- [ ] Log structured agent run summaries to PostgreSQL; raw LLM reasoning blobs to MongoDB
 
 **Agent loop pseudocode:**
 ```python
@@ -201,12 +204,12 @@ while True:
 **Owner:** —
 **Estimated Time:** 4–5 hrs
 
-> **What is Hex?** Hex is an AI analytics platform — collaborative notebooks + dashboards. Think Jupyter + Streamlit but production-grade with built-in AI. We use it for the data pipeline and live market dashboarding.
+> **What is Hex?** Hex is an AI analytics platform — collaborative notebooks + dashboards. Think Jupyter + Streamlit but production-grade with built-in AI. We use it for the data pipeline and live market dashboarding. **Hex requires a relational database** — it connects directly to PostgreSQL, no middleware needed.
 
 - [ ] Sign up / set up Hex workspace
-- [ ] Connect Hex to MongoDB data source
-- [ ] Build Hex notebook: ingest Polymarket market snapshots
-- [ ] Build Hex notebook: agent run logs + thesis history
+- [ ] Connect Hex to PostgreSQL (direct connector — host, port, db, credentials)
+- [ ] Build Hex notebook: ingest Polymarket market snapshots from `markets` table
+- [ ] Build Hex notebook: agent run logs + thesis history from `theses` + `agent_runs` tables
 - [ ] Build Hex data app (dashboard):
   - Live market odds tracker
   - Agent confidence scores over time
@@ -220,22 +223,23 @@ while True:
 
 ---
 
-### MODULE 6 — Backend API (Flask or Node)
+### MODULE 6 — Backend API (Flask)
 **Owner:** —
 **Estimated Time:** 3–5 hrs
 
-> **Decision needed:** Flask (Python, easier ML integration) vs. Node/Express (faster, better Next.js DX). Recommend: **Flask** if ML owner is Python-heavy; **Node** if frontend owner doubles as backend.
+> **Flask** is confirmed. Python across agent + backend means shared utility code, no context switching, and direct imports between the agent loop and API layer.
 
-- [ ] Decide Flask vs Node (note decision here: _______)
-- [ ] Set up server with basic routes
+- [ ] Set up Flask app with blueprints (routes organized by domain)
 - [ ] Route: `GET /markets` — proxy Polymarket data
-- [ ] Route: `GET /agent/runs` — fetch agent run history from MongoDB
+- [ ] Route: `GET /agent/runs` — fetch agent run history from PostgreSQL
 - [ ] Route: `POST /agent/trigger` — manually trigger agent loop
-- [ ] Route: `GET /thesis/:marketId` — get thesis for a market
+- [ ] Route: `GET /thesis/<market_id>` — get thesis for a market from PostgreSQL
 - [ ] Route: `POST /trade/simulate` — run simulated trade
+- [ ] Route: `POST /api/payoff` — payoff engine calculations
 - [ ] Auth0 middleware: protect write endpoints
 - [ ] CORS config for Next.js frontend
-- [ ] Connect to MongoDB (Mongoose or PyMongo)
+- [ ] Connect to PostgreSQL via SQLAlchemy
+- [ ] Connect to MongoDB via PyMongo (agent internals only)
 - [ ] Deploy to GoDaddy or Railway (decide)
 
 ---
@@ -260,19 +264,29 @@ while True:
 
 ---
 
-### MODULE 8 — MongoDB Schema
+### MODULE 8 — Database Schemas
 **Owner:** —
 **Estimated Time:** 1–2 hrs
 
-- [ ] Define collections:
-  - `markets` — Polymarket snapshots (id, question, probability, timestamp)
-  - `agent_runs` — each loop iteration (timestamp, markets_scanned, trades_triggered)
-  - `theses` — per-market thesis (marketId, thesis_text, confidence, model_used)
-  - `trades` — trade log (marketId, side, amount, simulated, outcome)
-  - `signals` — ML signal scores (marketId, sentiment_score, divergence, timestamp)
-  - `payoffs` — cached payoff calculations (marketId, positionSize, side, ev, breakeven, curve_data, timestamp) ← new
-- [ ] Set up MongoDB Atlas cluster
-- [ ] Add indexes on `marketId`, `timestamp`
+**Two databases, two jobs:**
+- **PostgreSQL** — structured, Hex-facing, everything a query or dashboard will ever need
+- **MongoDB** — unstructured agent internals only, never touched by Hex
+
+#### PostgreSQL Tables
+- [ ] `markets` — `(id, question, category, implied_prob, volume, timestamp)`
+- [ ] `agent_runs` — `(id, timestamp, markets_scanned, trades_triggered, duration_ms)`
+- [ ] `theses` — `(id, market_id, thesis_text, confidence, model_used, ev, timestamp)`
+- [ ] `signals` — `(id, market_id, sentiment_score, divergence, timestamp)`
+- [ ] `trades` — `(id, market_id, side, amount, simulated, outcome, timestamp)`
+- [ ] `payoffs` — `(id, market_id, position_size, side, ev, breakeven, curve_data jsonb, timestamp)`
+- [ ] Set up PostgreSQL on Railway or Supabase (easier than self-hosting on GoDaddy)
+- [ ] Add indexes on `market_id`, `timestamp` across all tables
+- [ ] Share connection string securely (not in repo)
+
+#### MongoDB Collections
+- [ ] `agent_raw_runs` — full JSON reasoning blobs per agent loop iteration (K2/Gemini/Hermes outputs)
+- [ ] `tavily_cache` — raw Tavily search result payloads, keyed by query + timestamp
+- [ ] Set up MongoDB Atlas cluster (free tier fine — low write volume)
 - [ ] Share connection string securely (not in repo)
 
 ---
@@ -281,14 +295,15 @@ while True:
 
 | Service | Where to get | Who owns |
 |---------|-------------|---------|
-| Polymarket API | polymarket.com/docs | — |
+| Polymarket API | polymarket.com/settings?tab=builder | — |
 | Tavily | tavily.com | — |
 | K2 Think V2 | (hackathon provided?) | — |
 | Gemini API | aistudio.google.com | — |
 | Hermes Nous Research | (via Together.ai or HuggingFace) | — |
 | Auth0 | auth0.com | — |
 | Hex API | hex.tech | — |
-| MongoDB Atlas | mongodb.com/atlas | — |
+| PostgreSQL | Railway or Supabase (free tier) | — |
+| MongoDB Atlas | mongodb.com/atlas (free tier) | — |
 | GoDaddy | godaddy.com | — |
 
 ---
@@ -329,7 +344,9 @@ Hour 22–24 │ Polish, demo prep, submission
 ## 📋 Considerations & Open Questions
 
 ### 🏗️ Architecture Decisions
-- **Flask vs Node:** Python makes ML/agent integration cleaner; Node has better async and DX with Next.js. Consider Flask for agent + separate Node for API gateway, or just Flask for everything.
+- **Flask confirmed** — Python across agent + backend means shared code, no context switching, direct imports between agent loop and API layer.
+- **Two databases, by design:** PostgreSQL handles all structured data that Hex, the API, and the frontend need to query. MongoDB handles raw, variable-length LLM reasoning blobs and Tavily dumps — things that would be painful to force into a relational schema. This is not database bloat; it's the right tool for each data shape.
+- **PostgreSQL hosting:** Railway or Supabase are both easier than self-hosting on GoDaddy for a hackathon. Both have free tiers and give you a connection string in minutes.
 - **Agent scheduling:** Cron job, background thread, or event-driven? For a hackathon demo, a manual trigger + polling loop is simplest.
 - **Real vs simulated trades:** Strongly recommend paper trading only during the hackathon to avoid financial risk. Real trade execution needs wallet + gas/fees handled.
 
@@ -339,9 +356,9 @@ Hour 22–24 │ Polish, demo prep, submission
 - **Prompt caching:** If Gemini supports it, cache system prompts to reduce latency + cost during demo.
 
 ### 📊 Hex API
-- Hex is primarily a **collaborative analytics notebook + dashboard platform** (think Jupyter meets Streamlit, production-grade). Its API lets you trigger notebook runs programmatically and embed published apps.
-- Likely use: build a Hex data app that visualizes the MongoDB data, then embed it in the Next.js frontend. This is the cleanest path to the $2,000 Hex prize.
-- Check if Hex has a direct MongoDB connector or if you need a middleware step.
+- Hex is a **collaborative analytics notebook + dashboard platform** (think Jupyter meets Streamlit, production-grade). Its API lets you trigger notebook runs programmatically and embed published apps.
+- **Hex requires a relational database** — it cannot connect to MongoDB. PostgreSQL is the direct connector, no middleware needed.
+- Strategy: all structured data lives in PostgreSQL → Hex connects directly → build data app → embed in Next.js frontend. Clean path to the $2,000 Hex prize.
 
 ### 🔒 Auth & Security
 - Auth0 should gate: trade execution endpoints, agent trigger, admin views
@@ -374,5 +391,3 @@ Hour 22–24 │ Polish, demo prep, submission
 - Designate one person as "integration owner" to wire modules together in final hours
 
 ---
-
-*Last updated: kickoff — update this file as decisions are made.*
