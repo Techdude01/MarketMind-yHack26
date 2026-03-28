@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useState } from "react";
 
 const defaultBase =
@@ -42,6 +43,11 @@ export default function Home() {
   return (
     <main style={{ padding: "1.5rem", fontFamily: "system-ui, sans-serif" }}>
       <h1 style={{ marginTop: 0 }}>MarketMind stack check</h1>
+      <p style={{ marginBottom: "1rem" }}>
+        <Link href="/markets" style={{ textDecoration: "underline" }}>
+          Test Polymarket API → /markets
+        </Link>
+      </p>
       <p style={{ maxWidth: "40rem" }}>
         API base (from{" "}
         <code style={{ fontSize: "0.9em" }}>NEXT_PUBLIC_API_BASE_URL</code>):
