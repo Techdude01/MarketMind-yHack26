@@ -7,3 +7,6 @@
 
 # Pytest cache — all depths
 **/.pytest_cache/
+
+.DS_Store
+/backend/.DS_Store
