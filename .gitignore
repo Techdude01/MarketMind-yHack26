@@ -11,3 +11,5 @@
 .DS_Store
 /backend/.DS_Store
 /frontend/.DS_Store
+.ngrok-postgres.log
+.ngrok-postgres.pid
