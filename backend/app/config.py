@@ -22,7 +22,7 @@ class Config:
 
     # LLMs
     K2_THINK_V2_API_KEY = os.getenv("K2_THINK_V2_API_KEY")
-    K2_THINK_V2_BASE_URL = os.getenv("K2_THINK_V2_BASE_URL")
+    K2_THINK_V2_BASE_URL = os.getenv("K2_THINK_V2_BASE_URL", "https://api.k2think.ai/v1")
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
     HERMES_API_KEY = os.getenv("HERMES_API_KEY")
     HERMES_BASE_URL = os.getenv("HERMES_BASE_URL", "https://api.together.xyz/v1")

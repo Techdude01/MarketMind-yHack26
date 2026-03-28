@@ -1,19 +1,20 @@
 """Google Gemini LLM service for thesis generation."""
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
+
 from app.config import Config
 
-_model = None
+_client = None
 
 
-def _get_model():
-    global _model
-    if _model is None:
+def _get_client() -> genai.Client:
+    global _client
+    if _client is None:
         if not Config.GEMINI_API_KEY:
             raise RuntimeError("GEMINI_API_KEY is not set in .env")
-        genai.configure(api_key=Config.GEMINI_API_KEY)
-        _model = genai.GenerativeModel("gemini-2.5-flash")
-    return _model
+        _client = genai.Client(api_key=Config.GEMINI_API_KEY)
+    return _client
 
 
 def generate_thesis(reasoning: str, market: dict) -> str:
@@ -28,7 +29,7 @@ def generate_thesis(reasoning: str, market: dict) -> str:
     Returns:
         The thesis text as a plain string.
     """
-    model = _get_model()
+    client = _get_client()
 
     prompt = (
         "You are MarketMind, an AI analyst for prediction markets.\n\n"
@@ -44,5 +45,11 @@ def generate_thesis(reasoning: str, market: dict) -> str:
         "4. Recommended position (YES / NO / SKIP)\n"
     )
 
-    response = model.generate_content(prompt)
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            temperature=0.4,
+        ),
+    )
     return response.text
