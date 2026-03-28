@@ -1,3 +1,8 @@
+flask>=3.0
+psycopg[binary]>=3.0
+python-dotenv>=1.0
+flask-cors>=4.0
+
 # MarketMind Backend Dependencies
 flask>=3.0.0
 flask-cors>=4.0.0
