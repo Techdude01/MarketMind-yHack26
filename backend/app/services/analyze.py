@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 
 from langchain_core.messages import AIMessage
@@ -11,16 +14,26 @@ from app.repositories.market_research import (
     get_latest_tavily,
     get_latest_thesis,
     insert_gemini_summary,
+    insert_sentiment_signal,
     insert_tavily_search,
 )
-from app.repositories.polymarket_markets import get_market_by_id
+from app.repositories.polymarket_markets import get_market_by_id, get_market_raw_json
 from app.services.llm.k2_agent import (
     K2_REACT_AGENT_MODEL_LABEL,
     analyze_market_with_agent,
     extract_tavily_hits_from_langgraph_messages,
     thesis_markdown_for_display,
 )
+from app.services.sentiment_signal import (
+    MODEL_NOTE_DEFAULT,
+    SUMMARY_EXCERPT_MAX,
+    category_hint_from_raw_json,
+    infer_market_probability,
+    try_compute_and_format_api_payload,
+)
 from app.services.thesis_parse import parse_structured_thesis_fields
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_TAVILY_MAX = 5
 MAX_TAVILY_MAX = 15
@@ -46,6 +59,27 @@ def clamp_tavily_max(raw: int | None) -> int:
     else:
         v = raw
     return min(v, MAX_TAVILY_MAX)
+
+
+def _sanitize_for_json(obj: Any) -> Any:
+    """Recursively coerce values so ``json.dumps`` / psycopg ``Json`` never see live exceptions."""
+    if obj is None or isinstance(obj, (bool, int, float, str)):
+        return obj
+    if isinstance(obj, BaseException):
+        return str(obj)
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    if isinstance(obj, Decimal):
+        return float(obj)
+    if isinstance(obj, bytes):
+        return obj.decode("utf-8", errors="replace")
+    if isinstance(obj, dict):
+        return {str(k): _sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_for_json(v) for v in obj]
+    if isinstance(obj, set):
+        return [_sanitize_for_json(v) for v in obj]
+    return str(obj)
 
 
 def _market_dict_for_agent(m: dict[str, Any]) -> dict[str, Any]:
@@ -117,7 +151,7 @@ def run_market_analysis(
         else:
             thesis_text = thesis_markdown_for_display(result.get("analysis") or "")
         search_query = "k2_react_agent"
-        results_list: list[dict[str, Any]] = hits
+        results_list: list[Any] = _sanitize_for_json(hits)
         tavily_id = insert_tavily_search(
             conn,
             polymarket_id=polymarket_id,
@@ -125,15 +159,25 @@ def run_market_analysis(
             results=results_list,
             max_results=tavily_max,
         )
-        thinking = result.get("thinking") or ""
+        thinking_raw = result.get("thinking") or ""
+        thinking_excerpt = (
+            thinking_raw[:8000]
+            if isinstance(thinking_raw, str)
+            else str(thinking_raw)[:8000]
+        )
+        rs_raw = result.get("reasoning_steps", 0)
+        try:
+            reasoning_steps_int = int(rs_raw)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            reasoning_steps_int = 0
         reasoning_input = json.dumps(
             {
-                "agent_thinking_excerpt": thinking[:8000],
-                "reasoning_steps": result.get("reasoning_steps", 0),
+                "agent_thinking_excerpt": thinking_excerpt,
+                "reasoning_steps": reasoning_steps_int,
             },
             ensure_ascii=False,
         )
-        insert_gemini_summary(
+        gemini_id, thesis_created_at = insert_gemini_summary(
             conn,
             polymarket_id=polymarket_id,
             tavily_search_id=tavily_id,
@@ -141,6 +185,44 @@ def run_market_analysis(
             reasoning_input=reasoning_input,
             model=K2_REACT_AGENT_MODEL_LABEL,
         )
+        thesis_created_iso = thesis_created_at.isoformat()
+        raw_gamma = get_market_raw_json(conn, polymarket_id)
+        category_hint = category_hint_from_raw_json(raw_gamma)
+        market_prob = infer_market_probability(m)
+        excerpt = (
+            thesis_text[:SUMMARY_EXCERPT_MAX]
+            if len(thesis_text) > SUMMARY_EXCERPT_MAX
+            else thesis_text
+        )
+        sentiment_analysis: dict[str, Any] | None = None
+        try:
+            api_sentiment = try_compute_and_format_api_payload(
+                thesis_text,
+                market_prob,
+                category_hint,
+                thesis_created_at_iso=thesis_created_iso,
+            )
+            if api_sentiment is not None:
+                insert_sentiment_signal(
+                    conn,
+                    polymarket_id=polymarket_id,
+                    gemini_summary_id=gemini_id,
+                    divergence_score=api_sentiment["divergence_score"],
+                    new_sentiment=api_sentiment["new_sentiment"],
+                    market_sentiment=api_sentiment["market_sentiment"],
+                    market_prob=market_prob,
+                    category=category_hint or None,
+                    summary_excerpt=excerpt,
+                    model_note=MODEL_NOTE_DEFAULT,
+                )
+                sentiment_analysis = api_sentiment
+        except Exception as exc:
+            logger.warning(
+                "sentiment persistence skipped for polymarket_id=%s: %s",
+                polymarket_id,
+                exc,
+                exc_info=True,
+            )
     except MarketNotFoundError:
         raise
     except Exception as exc:
@@ -156,4 +238,10 @@ def run_market_analysis(
         key=lambda r: float(r.get("score", 0)),
         reverse=True,
     )
-    return {"market_id": polymarket_id, "thesis": thesis, "news": news}
+    out: dict[str, Any] = {
+        "market_id": polymarket_id,
+        "thesis": thesis,
+        "news": news,
+        "sentiment_analysis": sentiment_analysis,
+    }
+    return out

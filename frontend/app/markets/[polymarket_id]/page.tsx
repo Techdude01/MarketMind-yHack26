@@ -91,12 +91,20 @@ interface MarketDetail {
 }
 
 interface ThesisRow {
+  id?: number;
   thesis_text: string;
   model: string;
   created_at: string;
   agent_probability?: number | null;
   agent_confidence?: string | null;
   agent_recommendation?: string | null;
+}
+
+interface SentimentAnalysisRow {
+  divergence_score: number;
+  new_sentiment: number;
+  market_sentiment: number;
+  created_at: string;
 }
 
 interface NewsItem {
@@ -184,6 +192,7 @@ interface AnalysisPayload {
   /** ``clob_prices_history`` vs ``fallback_flat`` (DB had no token + Gamma lookup failed). */
   timeline_source?: string;
   payoff_preview: PayoffPreview;
+  sentiment_analysis?: SentimentAnalysisRow | null;
 }
 
 // ── Formatters ────────────────────────────────────────────────────────────────
@@ -427,6 +436,7 @@ export default function MarketDetailPage() {
 
   const [market, setMarket] = useState<MarketDetail | null>(null);
   const [thesis, setThesis] = useState<ThesisRow | null>(null);
+  const [sentimentAnalysis, setSentimentAnalysis] = useState<SentimentAnalysisRow | null>(null);
   const [news, setNews] = useState<NewsItem[]>([]);
   const [timeline, setTimeline] = useState<TimelinePoint[]>([]);
   const [payoffPreview, setPayoffPreview] = useState<PayoffPreview | null>(null);
@@ -452,6 +462,7 @@ export default function MarketDetailPage() {
       const data = (await res.json()) as AnalysisPayload;
       setMarket(data.market);
       setThesis(data.thesis);
+      setSentimentAnalysis(data.sentiment_analysis ?? null);
       setNews(data.news ?? []);
       setTimeline(data.timeline ?? []);
       setPayoffPreview(data.payoff_preview ?? null);
@@ -939,22 +950,82 @@ export default function MarketDetailPage() {
               </div>
             </div>
 
-            <div style={{ border: `1px solid ${MM.border}`, borderTop: "none", background: MM.bg }}>
+            <div
+              className="terminal-thesis-grid"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "minmax(0, 1fr) minmax(260px, 380px)",
+                gap: 0,
+                border: `1px solid ${MM.border}`,
+                borderTop: "none",
+                background: MM.bg,
+              }}
+            >
               <div
                 style={{
-                  padding: "8px 12px",
-                  borderBottom: `1px solid ${MM.border}`,
-                  fontSize: 11,
-                  letterSpacing: "0.12em",
-                  color: MM.ghost,
+                  borderRight: `1px solid ${MM.border}`,
+                  minWidth: 0,
                 }}
               >
-                [AGENT_THESIS]
+                <div
+                  style={{
+                    padding: "8px 12px",
+                    borderBottom: `1px solid ${MM.border}`,
+                    fontSize: 11,
+                    letterSpacing: "0.12em",
+                    color: MM.ghost,
+                  }}
+                >
+                  [AGENT_THESIS]
+                </div>
+                <div style={{ padding: "14px 12px" }} className="thesis-body">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {thesis ? thesisMarkdownForDisplay(thesis.thesis_text) : "No thesis yet."}
+                  </ReactMarkdown>
+                </div>
               </div>
-              <div style={{ padding: "14px 12px" }} className="thesis-body">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {thesis ? thesisMarkdownForDisplay(thesis.thesis_text) : "No thesis yet."}
-                </ReactMarkdown>
+              <div style={{ minWidth: 0 }}>
+                <div
+                  style={{
+                    padding: "8px 12px",
+                    borderBottom: `1px solid ${MM.border}`,
+                    fontSize: 11,
+                    letterSpacing: "0.12em",
+                    color: MM.ghost,
+                  }}
+                >
+                  [SENTIMENT_ANALYSIS]
+                </div>
+                <div style={{ padding: "14px 12px", fontFamily: MM.font, fontSize: 12, color: MM.textSub }}>
+                  {sentimentAnalysis ? (
+                    <>
+                      <div style={{ marginBottom: 10, fontSize: 10, color: MM.dim, letterSpacing: "0.06em" }}>
+                        Sentiment Analysis
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        <StatCell
+                          label="divergence_score"
+                          value={sentimentAnalysis.divergence_score.toFixed(4)}
+                        />
+                        <StatCell
+                          label="new_sentiment"
+                          value={sentimentAnalysis.new_sentiment.toFixed(4)}
+                        />
+                        <StatCell
+                          label="market_sentiment"
+                          value={sentimentAnalysis.market_sentiment.toFixed(4)}
+                        />
+                      </div>
+                      <div style={{ marginTop: 14, fontSize: 10, color: MM.ghost }}>
+                        as_of: {formatDate(sentimentAnalysis.created_at)}
+                      </div>
+                    </>
+                  ) : (
+                    <span style={{ color: MM.dim }}>
+                      Run analyze to generate sentiment scores.
+                    </span>
+                  )}
+                </div>
               </div>
               <style>{`
                 .thesis-body { font-family: ${MM.font}; font-size: 12px; line-height: 1.9; color: ${MM.textSub}; }
@@ -974,6 +1045,10 @@ export default function MarketDetailPage() {
                 .thesis-body table { width: 100%; border-collapse: collapse; margin: 0 0 12px; font-size: 11px; }
                 .thesis-body th, .thesis-body td { border: 1px solid ${MM.border}; padding: 8px 10px; text-align: left; vertical-align: top; }
                 .thesis-body th { color: ${MM.text}; font-weight: 600; background: ${MM.surface2}; }
+                @media (max-width: 900px) {
+                  .terminal-thesis-grid { grid-template-columns: 1fr !important; }
+                  .terminal-thesis-grid > div:first-child { border-right: none !important; border-bottom: 1px solid ${MM.border}; }
+                }
               `}</style>
             </div>
           </CardShell>

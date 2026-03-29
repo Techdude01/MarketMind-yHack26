@@ -3,3 +3,5 @@ node_modules
 .git
 .env*
 npm-debug.log*
+bun.lockb
+tsconfig.tsbuildinfo

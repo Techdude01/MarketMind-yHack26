@@ -1,6 +1,7 @@
 """Ingestion routes — Gamma API → Postgres; optional batch analysis via analyze service."""
 
 import logging
+import os
 from multiprocessing import Pool
 from typing import Any
 
@@ -28,7 +29,21 @@ ingest_bp = Blueprint("ingest", __name__, url_prefix="/ingest")
 
 _DEFAULT_RESEARCH_LIMIT = 20
 _MAX_RESEARCH_LIMIT = 200
-_HOMEPAGE_ANALYSIS_PROCESSES = 6
+# Each worker loads HF sentiment models in memory; high counts duplicate Hub traffic + RAM.
+_HOMEPAGE_ANALYSIS_PROCESSES_DEFAULT = 2
+_HOMEPAGE_ANALYSIS_PROCESSES_MAX = 8
+
+
+def _homepage_analysis_processes() -> int:
+    raw = os.getenv(
+        "HOMEPAGE_ANALYSIS_PROCESSES",
+        str(_HOMEPAGE_ANALYSIS_PROCESSES_DEFAULT),
+    )
+    try:
+        n = int(raw)
+    except ValueError:
+        n = _HOMEPAGE_ANALYSIS_PROCESSES_DEFAULT
+    return max(1, min(n, _HOMEPAGE_ANALYSIS_PROCESSES_MAX))
 
 
 def _run_homepage_market_analysis_task(polymarket_id: int, tavily_max: int) -> dict[str, Any]:
@@ -278,6 +293,10 @@ def ingest_homepage_pipeline():
     Query params:
         tavily_max — Tavily tool max_results per market (default 5, max 15)
         force      — ``true`` to re-analyze even if cached (default false)
+
+    Env:
+        HOMEPAGE_ANALYSIS_PROCESSES — parallel workers (default 2, max 8). Each
+        worker loads HF sentiment models; keep low in Docker unless HF_TOKEN is set.
     ---
     tags:
       - Ingest
@@ -340,7 +359,7 @@ def ingest_homepage_pipeline():
         return jsonify({"error": str(exc), "code": "DATABASE_ERROR"}), 503
 
     if to_analyze:
-        n_workers = min(_HOMEPAGE_ANALYSIS_PROCESSES, len(to_analyze))
+        n_workers = min(_homepage_analysis_processes(), len(to_analyze))
         args = [(pid, tavily_max) for pid in to_analyze]
         with Pool(processes=n_workers) as pool:
             results = pool.starmap(_run_homepage_market_analysis_task, args)

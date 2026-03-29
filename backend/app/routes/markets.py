@@ -8,7 +8,11 @@ from typing import Any
 from flask import Blueprint, jsonify, request
 
 from app.repositories.homepage_markets import list_homepage_markets
-from app.repositories.market_research import get_latest_tavily, get_latest_thesis
+from app.repositories.market_research import (
+    get_latest_tavily,
+    get_latest_thesis,
+    get_sentiment_for_gemini_summary,
+)
 from app.repositories.polymarket_markets import get_market_by_id, list_top_markets
 from app.services.payoff import compute_payoff_result
 from app.services.polymarket import get_prices_history
@@ -291,17 +295,22 @@ def get_market_analysis(polymarket_id: int):
             market = get_market_by_id(conn, polymarket_id)
             thesis = get_latest_thesis(conn, polymarket_id)
             news_results = get_latest_tavily(conn, polymarket_id)
+            structured = parse_structured_thesis_fields(
+                thesis.get("thesis_text") if isinstance(thesis, dict) else None
+            )
+            thesis_payload = dict(thesis or {})
+            thesis_payload.update(structured)
+            sentiment_analysis = None
+            _tid = thesis_payload.get("id")
+            if market is not None and isinstance(_tid, int):
+                sentiment_analysis = get_sentiment_for_gemini_summary(
+                    conn, _tid
+                )
     except Exception as exc:
         return jsonify({"error": str(exc), "code": "DATABASE_ERROR"}), 503
 
     if market is None:
         return jsonify({"error": "Market not found", "code": "NOT_FOUND"}), 404
-
-    structured = parse_structured_thesis_fields(
-        thesis.get("thesis_text") if isinstance(thesis, dict) else None
-    )
-    thesis_payload = dict(thesis or {})
-    thesis_payload.update(structured)
 
     news = sorted(
         (r for r in news_results if isinstance(r, dict)),
@@ -343,6 +352,7 @@ def get_market_analysis(polymarket_id: int):
                     "cost": payoff_preview.cost,
                     "pnl_curve": payoff_preview.pnl_curve,
                 },
+                "sentiment_analysis": sentiment_analysis,
             }
         ),
         200,

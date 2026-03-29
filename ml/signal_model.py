@@ -1,3 +1,4 @@
+"""Offline evaluation; production inference lives in ``backend/app/services/sentiment_signal.py``."""
 import numpy as np
 from transformers import pipeline
 

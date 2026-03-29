@@ -21,11 +21,31 @@ Monorepo with a Next.js frontend, Flask API, and PostgreSQL, orchestrated with D
    docker compose up --build
    ```
 
+This repo is optimized for faster container rebuilds:
+- Backend image uses `uv` for Python dependency installation.
+- Frontend image uses `npm ci` with a Docker cache mount for reliable rebuilds.
+- Compose mounts use cache-friendly settings for local development.
+
+Note: Bun can crash on some Linux arm64 Docker environments during install, so Docker uses npm by default for stability.
+
+Useful commands:
+
+```bash
+# Rebuild only app images
+docker compose build backend frontend
+
+# Start without forcing a rebuild
+docker compose up
+
+# Recreate containers if dependency layer changed
+docker compose up --build --force-recreate
+```
+
 3. Open the app:
 
    - **Frontend:** [http://localhost:3000](http://localhost:3000) — use the buttons to call the API.
-   - **Backend:** [http://localhost:5000/health](http://localhost:5000/health)
-  - **Postgres:** `localhost:5433` (credentials match `.env`)
+   - **Backend:** [http://localhost:5001/health](http://localhost:5001/health)
+   - **Postgres:** `localhost:5433` (credentials match `.env`)
 
 ## Verify database read/write
 
@@ -33,9 +53,9 @@ Monorepo with a Next.js frontend, Flask API, and PostgreSQL, orchestrated with D
 - Or use curl:
 
   ```bash
-  curl -s http://localhost:5000/db/write -H "Content-Type: application/json" \
+   curl -s http://localhost:5001/db/write -H "Content-Type: application/json" \
     -d '{"message":"manual test"}'
-  curl -s http://localhost:5000/db/read
+   curl -s http://localhost:5001/db/read
   ```
 
 ## Data persistence

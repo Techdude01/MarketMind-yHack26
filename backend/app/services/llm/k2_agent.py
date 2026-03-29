@@ -37,15 +37,25 @@ logger = logging.getLogger(__name__)
 
 def _is_retryable_k2_upstream_error(exc: BaseException) -> bool:
     """True for transient K2 / OpenAI-compatible gateway failures worth retrying."""
+    msg_l = str(exc).lower()
+    if any(
+        x in msg_l
+        for x in (
+            "incomplete chunked read",
+            "peer closed connection",
+            "connection reset",
+            "broken pipe",
+        )
+    ):
+        return True
     if isinstance(exc, (InternalServerError, APIConnectionError, RateLimitError)):
         return True
     if isinstance(exc, APIError):
         code = getattr(exc, "status_code", None)
         if code is not None and code < 500:
             return False
-        msg = str(exc).lower()
         if any(
-            x in msg
+            x in msg_l
             for x in (
                 "server error",
                 "try again",
@@ -349,7 +359,12 @@ def run_k2_agent(
         }]
         
         # Append tool message & run agent again
-        messages.append(ToolMessage(content=json.dumps(tool_res), tool_call_id=fake_id))
+        messages.append(
+            ToolMessage(
+                content=json.dumps(tool_res, default=str, ensure_ascii=False),
+                tool_call_id=fake_id,
+            )
+        )
         
         result = _invoke_agent_with_retries(
             agent,

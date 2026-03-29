@@ -132,6 +132,12 @@ FROM polymarket_markets
 WHERE polymarket_id = %(polymarket_id)s
 """
 
+GET_MARKET_RAW_JSON_SQL = """
+SELECT raw_json
+FROM polymarket_markets
+WHERE polymarket_id = %(polymarket_id)s
+"""
+
 
 def _json_safe_value(v: Any) -> Any:
     if isinstance(v, Decimal):
@@ -201,6 +207,17 @@ def get_market_by_id(conn, polymarket_id: int) -> dict[str, Any] | None:
         if rec is None:
             return None
         return _serialize_market_row(dict(zip(colnames, rec)))
+
+
+def get_market_raw_json(conn, polymarket_id: int) -> dict[str, Any] | None:
+    """Load Gamma ``raw_json`` only (for category hint); avoids exposing it on public list APIs."""
+    with conn.cursor() as cur:
+        cur.execute(GET_MARKET_RAW_JSON_SQL, {"polymarket_id": polymarket_id})
+        row = cur.fetchone()
+        if row is None or row[0] is None:
+            return None
+        raw = row[0]
+        return raw if isinstance(raw, dict) else None
 
 
 def count_markets(conn) -> int:

@@ -1,13 +1,16 @@
-FROM node:22-alpine
-
-RUN apk add --no-cache python3 make g++
+# syntax=docker/dockerfile:1
+# Debian slim reduces EIO/rmdir failures during npm installs vs Alpine on some Docker Desktop setups.
+FROM node:22
 
 WORKDIR /app
 
-RUN apk add --no-cache python3 make g++ libc6-compat
+ENV CI=true \
+    NPM_CONFIG_UPDATE_NOTIFIER=false
 
-COPY package*.json ./
-RUN npm install --legacy-peer-deps
+COPY package.json package-lock.json ./
+
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --legacy-peer-deps --no-audit --no-fund
 
 COPY . .
 
