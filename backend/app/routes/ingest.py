@@ -18,7 +18,11 @@ from app.services.analyze import (
     clamp_tavily_max,
     run_market_analysis,
 )
-from app.services.polymarket_gamma import fetch_filtered_markets, rows_for_upsert
+from app.services.polymarket_gamma import (
+    fetch_filtered_markets,
+    filter_and_rank_markets,
+    rows_for_upsert,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +60,11 @@ def _ingest_polymarket_gamma_rows() -> (
     except ValueError as exc:
         return None, None, None, (jsonify({"error": str(exc), "code": "GAMMA_PARSE"}), 502)
 
+    filtered = filter_and_rank_markets(raw)
+    logger.info("Ingestion filter: %d fetched → %d kept", len(raw), len(filtered))
+
     try:
-        rows = rows_for_upsert(raw)
+        rows = rows_for_upsert(filtered)
     except ValueError as exc:
         return None, None, None, (jsonify({"error": str(exc), "code": "MARKET_PARSE"}), 400)
 
@@ -65,8 +72,7 @@ def _ingest_polymarket_gamma_rows() -> (
         with get_connection() as conn:
             n_ok, row_errors = upsert_markets(conn, rows)
 
-            # Homepage selection — runs against raw Gamma dicts, writes to homepage_markets
-            hp_selections = select_homepage_markets(raw)
+            hp_selections = select_homepage_markets(filtered)
             hp_count = upsert_homepage_selections(conn, hp_selections)
 
             conn.commit()
@@ -101,7 +107,7 @@ def ingest_markets():
     return jsonify(
         {
             "fetched": len(raw),
-            "parsed": len(rows),
+            "filtered": len(rows),
             "upserted": n_ok,
             "failed": len(row_errors),
             "errors": row_errors,
@@ -208,7 +214,7 @@ def ingest_pipeline():
     return jsonify(
         {
             "fetched": len(raw),
-            "parsed": len(rows),
+            "filtered": len(rows),
             "upserted": n_ok,
             "upsert_failed": len(row_errors),
             "upsert_errors": row_errors,

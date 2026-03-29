@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -29,8 +30,8 @@ def _end_date_min_at_least_days_ahead(days: int) -> str:
 
 def fetch_filtered_markets(
     *,
-    limit: int = 36,
-    volume_num_min: int = 10_000_000,
+    limit: int = 100,
+    volume_num_min: int = 500_000,
     min_days_until_end: int = 2,
     end_date_min: str | None = None,
     end_date_max: str | None = None,
@@ -39,9 +40,9 @@ def fetch_filtered_markets(
     """GET Gamma markets list; returns a list of raw market dicts (ignores events table).
 
     By default, ``end_date_min`` is UTC today + ``min_days_until_end`` days (default **2**),
-    i.e. markets that end at least two days from now—e.g. if today is 28 Mar, that is 30 Mar
-    or later. Combined with ``volume_num_min`` (default **$10M+**). Override with ``end_date_min`` /
-    ``end_date_max`` if needed.
+    i.e. markets that end at least two days from now. Combined with ``volume_num_min``
+    (default **$500K+**) to cast a wide net — downstream ``filter_and_rank_markets`` narrows
+    to the best ~30. Override with ``end_date_min`` / ``end_date_max`` if needed.
     """
     resolved_min = (
         end_date_min
@@ -178,6 +179,88 @@ def _require_polymarket_id(raw: dict[str, Any]) -> int:
         return int(rid)
     except (TypeError, ValueError) as e:
         raise ValueError(f"invalid market id: {rid!r}") from e
+
+
+_PRICE_LO = 0.03
+_PRICE_HI = 0.97
+_DEFAULT_TOP_N = 30
+
+
+def _to_float(v: Any) -> float | None:
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def is_good_market(market: dict[str, Any]) -> bool:
+    """Hard-filter a raw Gamma market dict for demo quality.
+
+    Only rejects markets that are clearly unsuitable — closed, archived, or
+    near-certain (price pinned at 0/1).  Fields that Gamma sometimes omits
+    (``acceptingOrders``, ``bestBid``, ``bestAsk``) are treated as OK when
+    absent so we don't silently drop most of the dataset.
+    """
+    active = _parse_bool(market.get("active"))
+    if active is False:
+        return False
+
+    if _parse_bool(market.get("closed")):
+        return False
+
+    if _parse_bool(market.get("archived")):
+        return False
+
+    accepting = _parse_bool(market.get("acceptingOrders"))
+    if accepting is False:
+        return False
+
+    ltp = _to_float(market.get("lastTradePrice"))
+    if ltp is not None and (ltp < _PRICE_LO or ltp > _PRICE_HI):
+        return False
+
+    return True
+
+
+def score_market(market: dict[str, Any]) -> float:
+    """Soft-rank a raw Gamma dict that already passed hard filters.
+
+    Higher is better.  Volume dominates, with bonuses for featured status,
+    recent trading activity, and having a two-sided book.
+    """
+    vol = _to_float(market.get("volumeNum")) or 1
+    score = math.log(vol + 1)
+
+    if _parse_bool(market.get("featured")):
+        score += 2.0
+
+    vol24 = _to_float(market.get("volume24hr"))
+    vol1w = _to_float(market.get("volume1wk"))
+    if vol24 and vol24 > 50_000:
+        score += 1.0
+    elif vol1w and vol1w > 200_000:
+        score += 0.5
+
+    if _to_float(market.get("bestBid")) and _to_float(market.get("bestAsk")):
+        score += 0.5
+
+    return score
+
+
+def filter_and_rank_markets(
+    raw_markets: list[dict[str, Any]], *, top_n: int = _DEFAULT_TOP_N
+) -> list[dict[str, Any]]:
+    """Apply hard filters, score, sort, and return top *top_n* raw Gamma dicts."""
+    good = [m for m in raw_markets if is_good_market(m)]
+    good.sort(key=score_market, reverse=True)
+    kept = good[:top_n]
+    logger.info(
+        "filter_and_rank: %d raw → %d passed hard filters → %d kept (top_n=%d)",
+        len(raw_markets), len(good), len(kept), top_n,
+    )
+    return kept
 
 
 def market_row_from_gamma(raw: dict[str, Any]) -> dict[str, Any]:
