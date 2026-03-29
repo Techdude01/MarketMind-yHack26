@@ -1,134 +1,168 @@
-# Module 4 Signal Model
+# Module 4 — Signal Model
 
-This module is summary-driven and does not call search, LLM, or database layers.
+Converts a Gemini-generated news summary into a structured trading signal.
+Does not call search, LLM, or database layers.
 
-Scope owned here:
+---
 
-1. Category routing (financial vs non-financial sentiment model).
-2. Sentiment scalar conversion in [-1, 1].
-3. Divergence and action decision.
+## What this module produces and why it matters
+
+A trader looking at a Polymarket market has one question:
+is the crowd's implied probability correct given what the news says?
+
+This module answers that question with a single, defensible number — edge —
+defined as the gap between what the market prices and what news sentiment implies
+the true probability should be. Every field in the output dict exists to make
+that gap legible, trustworthy, and actionable.
+
+---
+
+## Scope
+
+1. Category routing — choose the right sentiment model for the market domain.
+2. Sentiment scalar — convert model output to a signed float in [-1, +1].
+3. Market normalization — map Polymarket implied probability to the same scale.
+4. Divergence and edge — measure the gap and express it in probability terms.
+5. Confidence and timing — weight the signal by strength and resolution urgency.
+6. OOD flagging — mark when the signal is operating outside its reliable domain.
+
+---
 
 ## Model routing
 
-- ProsusAI/finbert for financial categories.
-- cardiffnlp/twitter-roberta-base-sentiment-latest otherwise.
+Financial markets use ProsusAI/finbert.
+All other markets use cardiffnlp/twitter-roberta-base-sentiment-latest.
 
 Financial category keywords:
-
 - crypto
 - economics
 - finance
+- financial
 - stocks
 - fed
 - rates
 - equity
 - earnings
 
-## Core formula
+Routing assumption: keyword match on market_category is a coarse but fast
+domain heuristic. FinBERT was trained on Reuters and Bloomberg financial text.
+Cardiff RoBERTa was trained on 124M tweets covering politics, sports, and
+social events. Using the wrong model for the domain degrades signal quality
+without raising an error — hence the explicit split.
 
-market_sentiment = (market_prob - 0.5) * 2
+---
+
+## Core formulas
+
+### Step 1 — sentiment scalar
+
+Both models return softmax probabilities over three classes.
+Collapse to a single signed float:
+
+    sentiment = (positive_prob × +1.0)
+              + (negative_prob × -1.0)
+              + (neutral_prob  ×  0.0)
+
+    sentiment = clip(sentiment, -1.0, +1.0)
+
+The weighted sum preserves confidence information that argmax discards.
+A model that is 94% confident negative scores -0.94.
+A model that is 36% confident negative scores -0.36.
+These are meaningfully different signals for a trader.
+
+### Step 2 — market normalization
+
+Map Polymarket implied probability (range 0.0–1.0) to the same [-1, +1] scale:
+
+    market_sentiment = (market_prob - 0.5) × 2
 
 This maps:
+- 0.0  → -1.0   (market certain NO)
+- 0.5  →  0.0   (market uncertain)
+- 1.0  → +1.0   (market certain YES)
 
-- 0.0 -> -1.0
-- 0.5 -> 0.0
-- 1.0 -> +1.0
+Assumption: probability 0.5 and sentiment 0.0 both represent maximum
+uncertainty. The linear map is the simplest transformation that aligns
+their midpoints and spans. No information is destroyed.
 
-divergence = abs(news_sentiment - market_sentiment)
+### Step 3 — divergence
 
-actionable = divergence > THRESHOLD
+    divergence = abs(news_sentiment - market_sentiment)
 
-action = ACT if actionable else SKIP
+Range: [0.0, 2.0].
+
+- divergence ≈ 0   news and market agree. No potential shift detected.
+- divergence > 0.3 news and market meaningfully disagree. Worth investigating.
+- divergence → 2.0 news and market are at opposite extremes.
+
+Divergence does not say which direction the shift will go or how large it
+will be. It says: the crowd's opinion and the news are not telling the same story.
+
 
 ## Public functions
 
-- get_sentiment_score(summary, category) -> float
-- scores_to_float(scores) -> float
-- compute_signal(summary, market_prob, category) -> dict
+### get_sentiment_score(summary, category) -> float
 
-Return dict keys:
+Routes summary to the correct model and returns a sentiment scalar in [-1, +1].
+Input text is not preprocessed beyond stripping whitespace.
+Gemini summaries are clean prose — no tweet normalization is needed.
 
-- news_sentiment
-- market_sentiment
-- divergence
-- direction
-- action
-- actionable
+### scores_to_float(scores) -> float
+
+Converts HuggingFace pipeline output (list of {label, score} dicts) to a
+single signed float. Handles both nested [[...]] and flat [...] output shapes
+across transformers library versions.
+
+### compute_signal(summary, market_prob, category, end_date_iso=None) -> dict
+
+Main entry point. Never raises. Returns a fully populated signal dict
+or a safe fallback on model failure.
+
+Return dict:
+
+    news_sentiment      float    [-1, +1]   sentiment from news summary
+    market_sentiment    float    [-1, +1]   normalized market probability
+    divergence          float    [0, 2]     absolute gap
+    direction           str                 "news_bullish" | "news_bearish"
+    action              str                 "Investigate" | "SKIP"
+    actionable          bool                divergence > THRESHOLD
+
+---
 
 ## Error handling
 
-- compute_signal never raises.
-- On sentiment-model failure, it falls back to news_sentiment=0.0 and action=SKIP.
+compute_signal never raises.
 
-## Evaluation workflow
+On sentiment model failure: news_sentiment defaults to 0.0, action to SKIP,
+actionable to False. The error message is included as "error": str(e) in the
+return dict so the agent loop can detect and log the failure rather than
+silently treating it as a genuine SKIP signal.
 
-Evaluator script: ml/evaluate_threshold.py
+---
+Run evaluation:
 
-Dataset columns expected:
+    python -m ml.evaluate_resolved_ood --dataset data/resolved_eval.csv
 
-- summary
-- market_category
-- market_prob
-- label_actionable
+Metrics reported:
+- Outcome metrics: predict resolved Yes/No from sign of news_sentiment.
+- Actionable metrics: precision/F1 on rows where pre-end probability exists.
+- Reported for ALL rows, ID-only rows, and OOD-only rows separately.
 
-Run:
+Label construction for actionable rows (when --attempt-history is used):
+1. Convert sampled pre-end market probability to market_sentiment scale.
+2. Convert final resolution (Yes=+1, No=-1) to outcome sentiment.
+3. Mark label_actionable = True when abs(outcome_sentiment - market_sentiment)
+   exceeds THRESHOLD. This operationalizes "the market was wrong before
+   resolution" as the ground truth for whether a signal should have fired.
 
-python -m ml.evaluate_threshold --dataset data/signal_eval_template.csv
+---
 
-## Resolved Market Evaluation + OOD
+## Assumptions and limitations
 
-You can evaluate on real resolved Polymarket markets with two scripts:
+1. Gemini summary quality gates everything. If the summary is not
+   news-driven or does not preserve sentiment direction, the sentiment
+   score is meaningless regardless of model correctness.
 
-1. Build dataset from closed CLOB markets (binary Yes/No only):
-
-python data/build_resolved_eval_dataset.py --target-rows 500 --max-pages 30 --output data/resolved_eval.csv
-
-Optional (slower): also try to fetch pre-end token history for actionable truth labels.
-
-python data/build_resolved_eval_dataset.py --target-rows 500 --attempt-history --output data/resolved_eval.csv
-
-2. Evaluate precision/F1 with ID vs OOD slices:
-
-python -m ml.evaluate_resolved_ood --dataset data/resolved_eval.csv
-
-The evaluator reports two metric groups:
-
-- Outcome metrics: predict resolved Yes/No from sentiment sign (`news_sentiment > 0`).
-- Actionable metrics: only on rows where pre-end probability exists.
-
-When `--attempt-history` is enabled, the builder labels `label_actionable` from hindsight mispricing:
-
-- Convert sampled market probability to sentiment scale.
-- Convert final resolved outcome (Yes/No winner) to +/-1 sentiment.
-- Mark actionable when absolute gap exceeds threshold.
-
-OOD split:
-
-- `is_ood=true` when market text does not look financial by keyword heuristics.
-- Evaluator reports ALL, ID, and OOD metrics separately.
-
-## No Tavily/Gemini Evaluation Path
-
-If you do not have Tavily or Gemini yet, evaluate in two layers:
-
-1. Sentiment model quality on labeled summaries:
-
-python -m ml.evaluate_sentiment_labels --dataset data/sentiment_eval_template.csv
-
-CSV schema:
-
-- summary
-- market_category
-- label_sentiment (positive/neutral/negative)
-- is_ood (optional)
-
-2. Resolved-market accountability (using proxy summaries from market text):
-
-python data/build_resolved_eval_dataset.py --target-rows 300 --max-pages 10 --output data/resolved_eval.csv
-python -m ml.evaluate_resolved_ood --dataset data/resolved_eval.csv
-
-Interpretation note:
-
-- Closed markets often have extreme final probabilities (0/1), so treat resolved-outcome metrics as a baseline sanity check.
-- For true actionable precision/F1, use pre-end probabilities (`--attempt-history`) or evaluate on rolling live snapshots.
-
+2. Keyword routing is coarse. A political market about federal spending
+   may contain "fed" and incorrectly route to FinBERT. Precision routing
+   requires a classifier, which is out of scope for this module.
