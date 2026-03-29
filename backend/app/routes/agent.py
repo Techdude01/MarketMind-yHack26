@@ -1,4 +1,4 @@
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 
 agent_bp = Blueprint("agent", __name__)
 
@@ -55,12 +55,43 @@ def trigger_agent():
       401:
         description: Unauthorised – valid credentials required.
     """
-    # TODO: add @requires_auth, wire to agent/loop.py
-    return jsonify(
-        {
-            "message": "stub — agent trigger not yet implemented",
-        }
-    ), 200
+    # TODO: add @requires_auth once Auth0 is wired
+
+    data = request.get_json(silent=True) or {}
+    market_id = data.get("market_id")
+    if not market_id:
+        return jsonify({"error": "Missing required field: market_id"}), 400
+
+    dry_run = data.get("dry_run", True)
+
+    # Allow caller to pass a full market dict inline (useful for testing).
+    # If only market_id is supplied, build a minimal stub market.
+    market = data.get("market") or {
+        "question": data.get("question", f"Market {market_id}"),
+        "description": data.get("description", ""),
+        "end_date": data.get("end_date", "unknown"),
+        "current_price": data.get("current_price", "unknown"),
+    }
+
+    try:
+        from app.services.llm.k2_agent import analyze_market_with_agent
+
+        result = analyze_market_with_agent(market)
+        return jsonify(
+            {
+                "market_id": market_id,
+                "dry_run": dry_run,
+                "analysis": result["analysis"],
+                "reasoning_steps": result["reasoning_steps"],
+                "excluded_domains": result["excluded_domains"],
+                # thinking is intentionally omitted from the API response;
+                # it's available in result["thinking"] for internal debugging.
+            }
+        ), 200
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 503
+    except Exception as exc:  # pragma: no cover
+        return jsonify({"error": f"Unexpected error: {exc}"}), 500
 
 
 @agent_bp.route("/agent/runs", methods=["GET"])

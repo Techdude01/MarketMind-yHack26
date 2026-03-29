@@ -16,6 +16,12 @@ tavily-python>=0.3.0
 google-genai>=1.0.0
 openai>=1.0.0            # for K2 (OpenAI-compatible endpoint)
 
+# Agentic Framework (for K2 ReAct agent)
+langgraph>=1.1.0
+langchain-core>=1.2.0
+langchain-community>=0.4.0
+langchain-openai>=1.1.0
+
 # Databases
 sqlalchemy>=2.0.0
 psycopg2-binary>=2.9.0
