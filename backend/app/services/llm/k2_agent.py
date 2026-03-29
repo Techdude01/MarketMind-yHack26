@@ -36,17 +36,29 @@ logger = logging.getLogger(__name__)
 
 
 def _is_retryable_k2_upstream_error(exc: BaseException) -> bool:
-    """True for transient K2 / OpenAI-compatible gateway failures worth retrying."""
+    """True for transient K2 / OpenAI-compatible gateway failures worth retrying.
+
+    LangGraph wraps upstream ``openai.APIError`` in its own exception types,
+    so we check the full ``__cause__`` chain and also do a broad string match
+    on the top-level message for common transient error phrases.
+    """
     msg_l = str(exc).lower()
-    if any(
-        x in msg_l
-        for x in (
-            "incomplete chunked read",
-            "peer closed connection",
-            "connection reset",
-            "broken pipe",
-        )
-    ):
+
+    _TRANSIENT_PHRASES = (
+        "incomplete chunked read",
+        "peer closed connection",
+        "connection reset",
+        "broken pipe",
+        "server error",
+        "try again",
+        "overloaded",
+        "timeout",
+        "temporarily unavailable",
+        "bad gateway",
+        "gateway timeout",
+    )
+
+    if any(x in msg_l for x in _TRANSIENT_PHRASES):
         return True
     if isinstance(exc, (InternalServerError, APIConnectionError, RateLimitError)):
         return True
@@ -54,20 +66,12 @@ def _is_retryable_k2_upstream_error(exc: BaseException) -> bool:
         code = getattr(exc, "status_code", None)
         if code is not None and code < 500:
             return False
-        if any(
-            x in msg_l
-            for x in (
-                "server error",
-                "try again",
-                "overloaded",
-                "timeout",
-                "temporarily unavailable",
-                "bad gateway",
-                "gateway timeout",
-            )
-        ):
-            return True
-        return code is None or code >= 500
+        return True
+
+    cause = getattr(exc, "__cause__", None) or getattr(exc, "__context__", None)
+    if cause is not None and cause is not exc:
+        return _is_retryable_k2_upstream_error(cause)
+
     return False
 
 

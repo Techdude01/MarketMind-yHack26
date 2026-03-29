@@ -16,6 +16,7 @@ from psycopg.types.json import Json
 logger = logging.getLogger(__name__)
 
 GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets"
+GAMMA_SEARCH_URL = "https://gamma-api.polymarket.com/public-search"
 
 
 def _utc_today() -> date:
@@ -248,3 +249,42 @@ def market_row_from_gamma(raw: dict[str, Any]) -> dict[str, Any]:
 def rows_for_upsert(raw_markets: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Parse a list of Gamma payloads into DB rows."""
     return [market_row_from_gamma(m) for m in raw_markets]
+
+
+def search_markets(query: str, *, limit: int = 20, timeout: float = 15.0) -> list[dict[str, Any]]:
+    """Full-text search via Gamma ``/public-search`` endpoint.
+
+    Returns a flat list of market dicts extracted from the ``events`` array.
+    Each market dict is the raw Gamma payload (same shape as ``fetch_filtered_markets``
+    items), suitable for ``market_row_from_gamma``.
+    """
+    params: dict[str, Any] = {
+        "q": query,
+        "limit_per_type": limit,
+    }
+    resp = requests.get(GAMMA_SEARCH_URL, params=params, timeout=timeout)
+    resp.raise_for_status()
+    data = resp.json()
+
+    markets: list[dict[str, Any]] = []
+    for event in data.get("events", []):
+        for mkt in event.get("markets", []):
+            if not isinstance(mkt, dict):
+                continue
+            if mkt.get("id") is None:
+                continue
+            markets.append(mkt)
+
+    logger.info("Gamma search q=%r returned %d markets", query, len(markets))
+    return markets
+
+
+def fetch_single_market(polymarket_id: int, *, timeout: float = 15.0) -> dict[str, Any]:
+    """Fetch a single market by polymarket_id from Gamma. Raises on failure."""
+    url = f"{GAMMA_MARKETS_URL}/{polymarket_id}"
+    resp = requests.get(url, timeout=timeout)
+    resp.raise_for_status()
+    raw = resp.json()
+    if not isinstance(raw, dict):
+        raise ValueError(f"Expected dict from Gamma for id {polymarket_id}, got {type(raw).__name__}")
+    return raw

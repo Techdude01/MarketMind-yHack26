@@ -16,7 +16,10 @@ from app.repositories.market_research import (
 from app.repositories.polymarket_markets import get_market_by_id, list_top_markets
 from app.services.payoff import compute_payoff_result
 from app.services.polymarket import get_prices_history
-from app.services.polymarket_gamma import fetch_yes_clob_token_id_for_polymarket
+from app.services.polymarket_gamma import (
+    fetch_yes_clob_token_id_for_polymarket,
+    search_markets,
+)
 from app.services.thesis_parse import parse_structured_thesis_fields
 
 markets_bp = Blueprint("markets", __name__)
@@ -241,6 +244,95 @@ def homepage_markets():
         return jsonify({"error": str(exc), "code": "DATABASE_ERROR"}), 503
 
     return jsonify({"markets": markets, "count": len(markets)}), 200
+
+
+@markets_bp.route("/markets/search", methods=["GET"])
+def search_polymarket_markets():
+    """
+    Search Polymarket markets via the Gamma public-search API.
+    ---
+    tags:
+      - Markets
+    summary: Full-text search across all Polymarket markets
+    parameters:
+      - name: q
+        in: query
+        required: true
+        type: string
+        description: Search query text
+      - name: limit
+        in: query
+        type: integer
+        default: 20
+    responses:
+      200:
+        description: Matching markets
+      400:
+        description: Missing query parameter
+      502:
+        description: Gamma API error
+    """
+    query = request.args.get("q", "", type=str).strip()
+    if not query:
+        return jsonify({"error": "Missing required query param: q", "code": "BAD_REQUEST"}), 400
+
+    raw_limit = request.args.get("limit", 20, type=int)
+    limit = max(1, min(raw_limit or 20, 50))
+
+    try:
+        raw_markets = search_markets(query, limit=limit)
+    except Exception as exc:
+        logger.warning("Gamma search failed for q=%r: %s", query, exc)
+        return jsonify({"error": str(exc), "code": "GAMMA_UPSTREAM"}), 502
+
+    markets = []
+    for m in raw_markets:
+        pid = m.get("id")
+        if pid is None:
+            continue
+        try:
+            pid_int = int(pid)
+        except (TypeError, ValueError):
+            continue
+
+        if str(m.get("closed", "")).lower() in ("true", "1", "yes"):
+            continue
+        if str(m.get("active", "true")).lower() in ("false", "0", "no"):
+            continue
+
+        last_trade = m.get("lastTradePrice")
+        volume_num = m.get("volumeNum")
+        outcomes = m.get("outcomes")
+        outcome_prices = m.get("outcomePrices")
+        if isinstance(outcomes, str):
+            try:
+                outcomes = json.loads(outcomes)
+            except json.JSONDecodeError:
+                outcomes = None
+        if isinstance(outcome_prices, str):
+            try:
+                outcome_prices = json.loads(outcome_prices)
+            except json.JSONDecodeError:
+                outcome_prices = None
+
+        markets.append({
+            "polymarket_id": pid_int,
+            "slug": m.get("slug"),
+            "question": m.get("question") or "(no question)",
+            "description": m.get("description"),
+            "image_url": m.get("image"),
+            "end_date": m.get("endDate"),
+            "active": m.get("active"),
+            "closed": m.get("closed"),
+            "last_trade_price": _float_or_none(last_trade),
+            "volume": _float_or_none(m.get("volume")),
+            "volume_num": _float_or_none(volume_num),
+            "liquidity": _float_or_none(m.get("liquidity")),
+            "outcomes": outcomes,
+            "outcome_prices": outcome_prices,
+        })
+
+    return jsonify({"markets": markets, "query": query, "count": len(markets)}), 200
 
 
 @markets_bp.route("/markets/<int:polymarket_id>", methods=["GET"])

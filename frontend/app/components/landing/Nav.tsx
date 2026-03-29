@@ -121,7 +121,7 @@ const S: Record<string, React.CSSProperties> = {
 
 const navLinks = [
   { label: "_markets", href: "/markets" },
-  { label: "_agent", href: "/markets" },
+  { label: "_agent", href: "/agent" },
   { label: "_dashboard", href: "/dashboard" },
 ];
 
