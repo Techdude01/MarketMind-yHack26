@@ -6,10 +6,6 @@ from typing import Any
 import requests
 from flask import Blueprint, jsonify, request
 
-from app.repositories.homepage_markets import (
-    select_homepage_markets,
-    upsert_homepage_selections,
-)
 from app.repositories.market_research import list_markets_for_research
 from app.repositories.polymarket_markets import upsert_markets
 from app.services.analyze import (
@@ -29,7 +25,7 @@ _MAX_RESEARCH_LIMIT = 200
 
 
 def _ingest_polymarket_gamma_rows() -> (
-    tuple[list[Any], list[dict[str, Any]], int, list[dict[str, Any]], int]
+    tuple[list[Any], list[dict[str, Any]], int, list[dict[str, Any]]]
     | tuple[None, None, None, tuple[Any, int]]
 ):
     """
@@ -64,11 +60,6 @@ def _ingest_polymarket_gamma_rows() -> (
     try:
         with get_connection() as conn:
             n_ok, row_errors = upsert_markets(conn, rows)
-
-            # Homepage selection — runs against raw Gamma dicts, writes to homepage_markets
-            hp_selections = select_homepage_markets(raw)
-            hp_count = upsert_homepage_selections(conn, hp_selections)
-
             conn.commit()
     except Exception:
         logger.exception("Upsert failed")
@@ -77,8 +68,7 @@ def _ingest_polymarket_gamma_rows() -> (
             503,
         )
 
-    logger.info("Homepage selection: %d markets written", hp_count)
-    return raw, rows, n_ok, row_errors, hp_count
+    return raw, rows, n_ok, row_errors
 
 
 @ingest_bp.route("/markets", methods=["POST"])
@@ -87,11 +77,11 @@ def ingest_markets():
     Fetch filtered markets from Polymarket Gamma and upsert into polymarket_markets.
     """
     out = _ingest_polymarket_gamma_rows()
-    if out[0] is None:
-        err_body, status = out[3]  # type: ignore[misc]
+    raw, rows, n_ok, row_errors = out
+    if raw is None:
+        err_body, status = row_errors  # type: ignore[misc]
         return err_body, status
 
-    raw, rows, n_ok, row_errors, hp_count = out  # type: ignore[misc]
     assert rows is not None and n_ok is not None
 
     if row_errors:
@@ -105,7 +95,6 @@ def ingest_markets():
             "upserted": n_ok,
             "failed": len(row_errors),
             "errors": row_errors,
-            "homepage_selected": hp_count,
             "sample_polymarket_ids": sample_ids,
         }
     ), 200
@@ -131,11 +120,11 @@ def ingest_pipeline():
     tavily_max = clamp_tavily_max(raw_tm)
 
     out = _ingest_polymarket_gamma_rows()
-    if out[0] is None:
-        err_body, status = out[3]  # type: ignore[misc]
+    raw, rows, n_ok, row_errors = out
+    if raw is None:
+        err_body, status = row_errors  # type: ignore[misc]
         return err_body, status
 
-    raw, rows, n_ok, row_errors, hp_count = out  # type: ignore[misc]
     assert rows is not None and n_ok is not None
 
     if row_errors:
@@ -212,7 +201,6 @@ def ingest_pipeline():
             "upserted": n_ok,
             "upsert_failed": len(row_errors),
             "upsert_errors": row_errors,
-            "homepage_selected": hp_count,
             "research_limit": limit,
             "tavily_max_results": tavily_max,
             "markets_considered": len(candidates),

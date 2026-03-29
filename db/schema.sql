@@ -90,20 +90,6 @@ CREATE TABLE IF NOT EXISTS market_gemini_summaries (
 CREATE INDEX IF NOT EXISTS idx_gemini_polymarket_created
     ON market_gemini_summaries (polymarket_id, created_at DESC);
 
--- Curated homepage/demo market selections (references polymarket_markets)
-CREATE TABLE IF NOT EXISTS homepage_markets (
-    id BIGSERIAL PRIMARY KEY,
-    polymarket_id BIGINT NOT NULL UNIQUE
-        REFERENCES polymarket_markets (polymarket_id) ON DELETE CASCADE,
-    demo_score NUMERIC NOT NULL DEFAULT 0,
-    selection_notes TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_homepage_markets_score
-    ON homepage_markets (demo_score DESC);
-
 -- Paper trades table to store user-submitted paper trades --
 CREATE TABLE IF NOT EXISTS paper_trades (
     id BIGSERIAL PRIMARY KEY,
