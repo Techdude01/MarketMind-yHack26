@@ -17,10 +17,10 @@ function StatusBadge({ status }: { status: Trade["status"] }) {
     won:  { color: MM.green, border: MM.green },
     lost: { color: MM.red,   border: MM.red },
   };
-  const { color, border } = colors[status];
+  const { color, border } = colors[status] || { color: MM.dim, border: MM.border };
   return (
     <span style={{ fontSize: 10, letterSpacing: "0.1em", color, border: `1px solid ${border}`, padding: "2px 6px" }}>
-      {status.toUpperCase()}
+      {status ? status.toUpperCase() : "UNKNOWN"}
     </span>
   );
 }
