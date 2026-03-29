@@ -13,7 +13,7 @@ FINANCIAL_KEYWORDS = {
     "equity",
     "earnings",
 }
-THRESHOLD = 0.3
+THRESHOLD = 0.4
 MAX_MODEL_TOKENS = 512
 
 
@@ -29,19 +29,9 @@ cardiff = pipeline(
 )
 
 
-def preprocess_text(text: str) -> str:
-    """Normalize handles/links in text, following Cardiff model recommendations."""
-    normalized: list[str] = []
-    for token in (text or "").split(" "):
-        token = "@user" if token.startswith("@") and len(token) > 1 else token
-        token = "http" if token.startswith("http") else token
-        normalized.append(token)
-    return " ".join(normalized).strip()
-
-
 def get_sentiment_score(summary: str, category: str) -> float:
     """Route by category and return scalar sentiment score in [-1, 1]."""
-    text = preprocess_text(summary or "")
+    text = summary.strip() if summary else ""
     if not text:
         return 0.0
 
@@ -84,7 +74,7 @@ def compute_signal(summary: str, market_prob: float, category: str) -> dict:
         divergence = abs(news_sentiment - market_sentiment)
         direction = "news_bullish" if news_sentiment > market_sentiment else "news_bearish"
         actionable = divergence > THRESHOLD
-        action = "ACT" if actionable else "SKIP"
+        action = "Investigate" if actionable else "SKIP"
 
         return {
             "news_sentiment": round(float(news_sentiment), 4),
