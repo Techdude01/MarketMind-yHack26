@@ -106,3 +106,29 @@ OOD split:
 
 - `is_ood=true` when market text does not look financial by keyword heuristics.
 - Evaluator reports ALL, ID, and OOD metrics separately.
+
+## No Tavily/Gemini Evaluation Path
+
+If you do not have Tavily or Gemini yet, evaluate in two layers:
+
+1. Sentiment model quality on labeled summaries:
+
+python -m ml.evaluate_sentiment_labels --dataset data/sentiment_eval_template.csv
+
+CSV schema:
+
+- summary
+- market_category
+- label_sentiment (positive/neutral/negative)
+- is_ood (optional)
+
+2. Resolved-market accountability (using proxy summaries from market text):
+
+python data/build_resolved_eval_dataset.py --target-rows 300 --max-pages 10 --output data/resolved_eval.csv
+python -m ml.evaluate_resolved_ood --dataset data/resolved_eval.csv
+
+Interpretation note:
+
+- Closed markets often have extreme final probabilities (0/1), so treat resolved-outcome metrics as a baseline sanity check.
+- For true actionable precision/F1, use pre-end probabilities (`--attempt-history`) or evaluate on rolling live snapshots.
+
