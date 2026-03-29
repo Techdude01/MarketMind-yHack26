@@ -13,7 +13,7 @@ FINANCIAL_KEYWORDS = {
     "equity",
     "earnings",
 }
-THRESHOLD = 0.4
+THRESHOLD = 0.35
 MAX_MODEL_TOKENS = 512
 
 

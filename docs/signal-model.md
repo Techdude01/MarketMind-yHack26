@@ -22,9 +22,7 @@ that gap legible, trustworthy, and actionable.
 1. Category routing — choose the right sentiment model for the market domain.
 2. Sentiment scalar — convert model output to a signed float in [-1, +1].
 3. Market normalization — map Polymarket implied probability to the same scale.
-4. Divergence and edge — measure the gap and express it in probability terms.
-5. Confidence and timing — weight the signal by strength and resolution urgency.
-6. OOD flagging — mark when the signal is operating outside its reliable domain.
+4. Divergence — measure the gap bewteen implicity of news and market.
 
 ---
 
@@ -32,6 +30,19 @@ that gap legible, trustworthy, and actionable.
 
 Financial markets use ProsusAI/finbert.
 All other markets use cardiffnlp/twitter-roberta-base-sentiment-latest.
+
+Both models will convert the meaningless logits into meaningful probabilities by using softmax
+raw text
+    ↓
+tokenizer  →  token IDs
+    ↓
+transformer layers  →  hidden states  (768-dim vector per token)
+    ↓
+token hidden state  →  represents the whole sentence
+    ↓
+linear classification head  →  3 raw logits  (one per class)
+    ↓
+softmax  →  3 probabilities summing to 1.0
 
 Financial category keywords:
 - crypto
