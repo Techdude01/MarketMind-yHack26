@@ -1,7 +1,9 @@
 """Tavily web-search service for the research stage of the agent loop."""
 
 from tavily import TavilyClient
+
 from app.config import Config
+from app.services.research_context import _clean_whitespace, clean_tavily_results
 
 _client = None
 
@@ -28,8 +30,9 @@ def search(query: str, max_results: int = 5) -> list[dict]:
         max_results: Maximum number of results to return (default 5).
 
     Returns:
-        A list of search-result dictionaries.
+        A list of search-result dictionaries (string fields whitespace-normalized).
     """
     client = _get_client()
-    response = client.search(query=query, max_results=max_results)
-    return response.get("results", [])
+    q = _clean_whitespace(str(query or ""))
+    response = client.search(query=q, max_results=max_results)
+    return clean_tavily_results(response.get("results", []))

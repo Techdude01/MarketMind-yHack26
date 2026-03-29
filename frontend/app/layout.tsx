@@ -40,12 +40,6 @@ export default function RootLayout({
             >
               Markets
             </Link>
-            <Link
-              href="/"
-              className="text-zinc-600 underline-offset-4 hover:underline dark:text-zinc-400"
-            >
-              Stack check
-            </Link>
           </nav>
         </header>
         {children}

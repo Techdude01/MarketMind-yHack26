@@ -62,3 +62,30 @@ CREATE INDEX IF NOT EXISTS idx_markets_active
 
 CREATE INDEX IF NOT EXISTS idx_markets_end_date
     ON polymarket_markets (end_date);
+
+-- Tavily search runs per Polymarket (append-only history)
+CREATE TABLE IF NOT EXISTS market_tavily_searches (
+    id BIGSERIAL PRIMARY KEY,
+    polymarket_id BIGINT NOT NULL REFERENCES polymarket_markets (polymarket_id) ON DELETE CASCADE,
+    search_query TEXT NOT NULL,
+    results JSONB NOT NULL,
+    max_results INT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_tavily_polymarket_created
+    ON market_tavily_searches (polymarket_id, created_at DESC);
+
+-- Gemini thesis output per Tavily run (append-only history)
+CREATE TABLE IF NOT EXISTS market_gemini_summaries (
+    id BIGSERIAL PRIMARY KEY,
+    polymarket_id BIGINT NOT NULL REFERENCES polymarket_markets (polymarket_id) ON DELETE CASCADE,
+    tavily_search_id BIGINT NOT NULL REFERENCES market_tavily_searches (id) ON DELETE CASCADE,
+    thesis_text TEXT NOT NULL,
+    reasoning_input TEXT NOT NULL,
+    model TEXT NOT NULL DEFAULT 'gemini-2.5-flash',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_gemini_polymarket_created
+    ON market_gemini_summaries (polymarket_id, created_at DESC);
