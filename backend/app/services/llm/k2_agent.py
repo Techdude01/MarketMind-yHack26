@@ -7,10 +7,11 @@ when it needs external information.
 For hackathon agentic track qualification.
 """
 
+import json
+import logging
 import re
 import time
-import logging
-from typing import List, Optional
+from typing import Any, List, Optional
 
 try:
     from langchain_tavily import TavilySearch as TavilySearchResults
@@ -19,7 +20,7 @@ except ImportError:
     from langchain_community.tools.tavily_search import TavilySearchResults  # type: ignore[no-redef]
     _TAVILY_NEW_API = False
 
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 from openai import InternalServerError
@@ -33,6 +34,11 @@ logger = logging.getLogger(__name__)
 # Polymarket / Manifold prices are circular — they reflect the market itself
 # rather than independent information about the underlying event.
 # ---------------------------------------------------------------------------
+# Closing tag for K2 internal reasoning (matches strip_thinking regex); display body follows this.
+_THINK_CLOSE = "\u003c/think\u003e"
+
+K2_REACT_AGENT_MODEL_LABEL = "MBZUAI-IFM/K2-Think-v2-ReAct"
+
 _POLYMARKET_EXCLUDED_DOMAINS: List[str] = [
     "polymarket.com",
     "manifold.markets",
@@ -64,10 +70,78 @@ def strip_thinking(text: str) -> str:
     cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
     # Also strip any orphaned closing tags if the block wasn't closed cleanly
     cleaned = re.sub(r"</think>", "", cleaned, flags=re.IGNORECASE)
+    
+    # K2 sometimes hallucinates text-based tool calls instead of using native tool calls.
+    # Strip them from the final output so they don't leak into the UI.
+    cleaned = re.sub(r'FN_CALL=True[^\n]*(?:\n|$)', '', cleaned, flags=re.IGNORECASE)
+    
     return cleaned.strip()
 
 
-def create_k2_agent(exclude_domains: Optional[List[str]] = None):
+def thesis_markdown_for_display(text: str) -> str:
+    """Return markdown meant for UI: body after the last ``</think>`` if present, else strip thinking."""
+    if _THINK_CLOSE in text:
+        return text.split(_THINK_CLOSE)[-1].strip()
+    return strip_thinking(text)
+
+
+def _safe_score(raw: Any) -> float:
+    if raw is None:
+        return 0.0
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _normalize_tavily_hit(item: dict[str, Any]) -> dict[str, Any]:
+    """Map LangChain/Tavily tool payload toward UI/news list shape."""
+    return {
+        "title": item.get("title") or item.get("name") or "",
+        "url": item.get("url") or item.get("link") or "",
+        "content": item.get("content") or item.get("raw_content") or "",
+        "score": _safe_score(item.get("score")),
+        "published_date": item.get("published_date") or item.get("published_time"),
+    }
+
+
+def extract_tavily_hits_from_langgraph_messages(messages: list) -> list[dict[str, Any]]:
+    """Collect Tavily search hits from LangGraph message history for Postgres ``market_tavily_searches``."""
+    out: list[dict[str, Any]] = []
+    for msg in messages:
+        if not isinstance(msg, ToolMessage):
+            continue
+        raw = msg.content
+        if raw is None:
+            continue
+        if isinstance(raw, str):
+            raw_stripped = raw.strip()
+            if not raw_stripped:
+                continue
+            try:
+                data: Any = json.loads(raw_stripped)
+            except json.JSONDecodeError:
+                continue
+        elif isinstance(raw, (dict, list)):
+            data = raw
+        else:
+            continue
+        if isinstance(data, dict) and "results" in data:
+            for item in data.get("results") or []:
+                if isinstance(item, dict):
+                    out.append(_normalize_tavily_hit(item))
+        elif isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict):
+                    out.append(_normalize_tavily_hit(item))
+    return out
+
+
+def create_k2_agent(
+    exclude_domains: Optional[List[str]] = None,
+    *,
+    tavily_max_results: int = 5,
+):
     """Create a K2 Think V2 ReAct agent with Tavily search capabilities.
 
     Args:
@@ -117,7 +191,7 @@ def create_k2_agent(exclude_domains: Optional[List[str]] = None):
     # results reflect real-world evidence, not circular market prices.
     search_tool = TavilySearchResults(
         api_key=Config.TAVILY_API_KEY,
-        max_results=5,
+        max_results=tavily_max_results,
         search_depth="advanced",
         exclude_domains=blocked,
     )
@@ -133,6 +207,8 @@ def run_k2_agent(
     max_retries: int = 3,
     system_prompt: Optional[str] = None,
     exclude_domains: Optional[List[str]] = None,
+    *,
+    tavily_max_results: int = 5,
 ) -> dict:
     """Run the K2 agent on a query and return the final response.
 
@@ -158,7 +234,10 @@ def run_k2_agent(
             - messages: Full conversation history including tool calls
             - steps: Number of reasoning steps taken
     """
-    agent = create_k2_agent(exclude_domains=exclude_domains)
+    agent = create_k2_agent(
+        exclude_domains=exclude_domains,
+        tavily_max_results=tavily_max_results,
+    )
 
     if verbose:
         print(f"🤖 K2 Agent Query: '{query}'\n")
@@ -189,6 +268,57 @@ def run_k2_agent(
     
     messages = result["messages"]
     raw_final = messages[-1].content
+
+    # [HACK] If K2 fails to use native OpenAI tool calling and instead emits
+    # literal string instructions (e.g. FN_CALL=True tavily_search...), we catch it,
+    # manually run the search, and feed it back to force a real ReAct loop!
+    # Without this, "news_and_research" remains empty and K2 hallucinates data.
+    fn_call_match = re.search(
+        r'FN_CALL\s*=\s*True[\s\S]*?tavily_search\s*\(\s*query\s*=\s*[\'"]([^\'"]+)[\'"]',
+        raw_final,
+        re.IGNORECASE,
+    )
+    if fn_call_match and len(messages) < 10:
+        search_query = fn_call_match.group(1)
+        if verbose:
+            print(f"\n🧠 K2 Hallucinated a tool call. Manually executing search for: {search_query}")
+        
+        blocked = list(_POLYMARKET_EXCLUDED_DOMAINS)
+        if exclude_domains:
+            blocked.extend(d for d in exclude_domains if d not in blocked)
+        search_tool = TavilySearchResults(
+            api_key=Config.TAVILY_API_KEY,
+            max_results=tavily_max_results,
+            search_depth="advanced",
+            exclude_domains=blocked,
+        )
+        tool_res = search_tool.invoke({"query": search_query})
+        
+        # Patch the AIMessage so LangGraph and our extractors see it as a native tool call
+        fake_id = "call_manual_" + str(int(time.time()))
+        messages[-1].tool_calls = [{
+            "name": "tavily_search_results_json", 
+            "args": {"query": search_query}, 
+            "id": fake_id, 
+            "type": "tool_call"
+        }]
+        
+        # Append tool message & run agent again
+        messages.append(ToolMessage(content=json.dumps(tool_res), tool_call_id=fake_id))
+        
+        for attempt in range(1, max_retries + 1):
+            try:
+                result = agent.invoke({"messages": messages})
+                break
+            except InternalServerError as exc:
+                wait = 2 ** attempt
+                if attempt < max_retries:
+                    time.sleep(wait)
+                else:
+                    raise RuntimeError("K2 API Server busy") from exc
+        
+        messages = result["messages"]
+        raw_final = messages[-1].content
 
     # Extract raw thinking for debug storage (never shown to users)
     thinking_match = re.search(r"<think>(.*?)</think>", raw_final, re.DOTALL | re.IGNORECASE)
@@ -243,7 +373,13 @@ OUTPUT STRUCTURE:
 """
 
 
-def analyze_market_with_agent(market: dict) -> dict:
+def analyze_market_with_agent(
+    market: dict,
+    *,
+    include_messages: bool = False,
+    verbose: bool = False,
+    tavily_max_results: int = 5,
+) -> dict:
     """Use the K2 ReAct agent to deeply analyse a prediction market.
 
     Tavily is configured to exclude prediction-market aggregator sites so
@@ -277,19 +413,21 @@ def analyze_market_with_agent(market: dict) -> dict:
 
     result = run_k2_agent(
         prompt,
-        verbose=True,
+        verbose=verbose,
         system_prompt=_MARKET_ANALYSIS_SYSTEM_PROMPT,
-        # Prediction-market sites are already in the default exclusion list;
-        # pass None here — create_k2_agent() always applies _POLYMARKET_EXCLUDED_DOMAINS.
         exclude_domains=None,
+        tavily_max_results=tavily_max_results,
     )
 
-    return {
+    out: dict[str, Any] = {
         "analysis": result["final_answer"],
-        "thinking": result["thinking"],   # chain-of-thought — strip before showing users
+        "thinking": result["thinking"],
         "reasoning_steps": result["steps"],
         "excluded_domains": _POLYMARKET_EXCLUDED_DOMAINS,
     }
+    if include_messages:
+        out["messages"] = result["messages"]
+    return out
 
 
 # Streaming support for real-time UX
