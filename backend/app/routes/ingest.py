@@ -1,4 +1,4 @@
-"""Ingestion routes — Gamma API → Postgres; optional Tavily + Gemini pipeline."""
+"""Ingestion routes — Gamma API → Postgres; K2 → Tavily → Gemini pipeline."""
 
 import logging
 from typing import Any
@@ -8,12 +8,19 @@ from flask import Blueprint, jsonify, request
 
 from app.repositories.market_research import (
     insert_gemini_summary,
+    insert_k2_search_queries,
     insert_tavily_search,
     list_markets_for_research,
 )
 from app.repositories.polymarket_markets import upsert_markets
+from app.services.llm import k2 as k2_svc
 from app.services.llm.gemini import generate_thesis
-from app.services.polymarket_gamma import fetch_filtered_markets, rows_for_upsert
+from app.services.polymarket_gamma import (
+    DEMO_MARKETS_TOP_N,
+    fetch_filtered_markets,
+    filter_and_rank_markets_for_demo,
+    rows_for_upsert,
+)
 from app.services.research_context import (
     build_tavily_search_query,
     format_tavily_results_for_gemini,
@@ -28,17 +35,25 @@ _DEFAULT_RESEARCH_LIMIT = 20
 _MAX_RESEARCH_LIMIT = 200
 _DEFAULT_TAVILY_MAX = 5
 _MAX_TAVILY_MAX = 15
+_DEFAULT_K2_QUERIES = 4
+_MAX_K2_QUERIES = 8
 
 
 def _ingest_polymarket_gamma_rows() -> (
-    tuple[list[Any], list[dict[str, Any]], int, list[dict[str, Any]]]
-    | tuple[None, None, None, tuple[Any, int]]
+    tuple[
+        list[Any],
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+        int,
+        list[dict[str, Any]],
+    ]
+    | tuple[None, None, None, None, tuple[Any, int]]
 ):
     """
-    Fetch Gamma markets, parse rows, upsert into ``polymarket_markets``.
+    Fetch Gamma markets, demo-filter/rank, parse rows, upsert into ``polymarket_markets``.
 
-    Returns ``(raw, rows, n_ok, row_errors)`` on success.
-    On failure returns ``(None, None, None, (jsonify_response, status))`` — caller should return it.
+    Returns ``(raw, filtered, rows, n_ok, row_errors)`` on success.
+    On failure returns ``(None, None, None, None, (jsonify_response, status))``.
     """
     from db import get_connection
 
@@ -46,7 +61,7 @@ def _ingest_polymarket_gamma_rows() -> (
         raw = fetch_filtered_markets()
     except requests.RequestException as exc:
         logger.warning("Gamma API request failed: %s", exc)
-        return None, None, None, (
+        return None, None, None, None, (
             jsonify(
                 {
                     "error": "Failed to fetch markets from Polymarket Gamma",
@@ -56,12 +71,20 @@ def _ingest_polymarket_gamma_rows() -> (
             502,
         )
     except ValueError as exc:
-        return None, None, None, (jsonify({"error": str(exc), "code": "GAMMA_PARSE"}), 502)
+        return None, None, None, None, (
+            jsonify({"error": str(exc), "code": "GAMMA_PARSE"}),
+            502,
+        )
+
+    filtered = filter_and_rank_markets_for_demo(raw, top_n=DEMO_MARKETS_TOP_N)
 
     try:
-        rows = rows_for_upsert(raw)
+        rows = rows_for_upsert(filtered)
     except ValueError as exc:
-        return None, None, None, (jsonify({"error": str(exc), "code": "MARKET_PARSE"}), 400)
+        return None, None, None, None, (
+            jsonify({"error": str(exc), "code": "MARKET_PARSE"}),
+            400,
+        )
 
     try:
         with get_connection() as conn:
@@ -69,12 +92,12 @@ def _ingest_polymarket_gamma_rows() -> (
             conn.commit()
     except Exception:
         logger.exception("Upsert failed")
-        return None, None, None, (
+        return None, None, None, None, (
             jsonify({"error": "Database error during market upsert", "code": "DATABASE_ERROR"}),
             503,
         )
 
-    return raw, rows, n_ok, row_errors
+    return raw, filtered, rows, n_ok, row_errors
 
 
 @ingest_bp.route("/markets", methods=["POST"])
@@ -83,12 +106,13 @@ def ingest_markets():
     Fetch filtered markets from Polymarket Gamma and upsert into polymarket_markets.
     """
     out = _ingest_polymarket_gamma_rows()
-    raw, rows, n_ok, row_errors = out
+    raw, filtered, rows, n_ok, last = out
     if raw is None:
-        err_body, status = row_errors  # type: ignore[misc]
+        err_body, status = last  # type: ignore[misc]
         return err_body, status
 
     assert rows is not None and n_ok is not None
+    row_errors = last
 
     if row_errors:
         logger.warning("Ingest partial failures: %d of %d rows", len(row_errors), len(rows))
@@ -97,6 +121,7 @@ def ingest_markets():
     return jsonify(
         {
             "fetched": len(raw),
+            "after_filter": len(filtered),
             "parsed": len(rows),
             "upserted": n_ok,
             "failed": len(row_errors),
@@ -109,11 +134,14 @@ def ingest_markets():
 @ingest_bp.route("/pipeline", methods=["POST"])
 def ingest_pipeline():
     """
-    Gamma upsert, then Tavily search + Gemini thesis for top markets by volume.
+    Full research pipeline: Gamma upsert → K2 search-query generation →
+    Tavily searches → Gemini thesis for top markets by volume.
 
     Query params:
-        limit — max markets to run research on (default 20, max 200)
-        tavily_max — Tavily max_results per market (default 5, max 15)
+        limit      — max markets to research (default 20, max 200)
+        tavily_max — Tavily max_results per query (default 5, max 15)
+        k2_queries — number of search queries K2 should generate per market
+                     (default 4, max 8)
     """
     from db import get_connection
 
@@ -127,13 +155,20 @@ def ingest_pipeline():
         tavily_max = _DEFAULT_TAVILY_MAX
     tavily_max = min(tavily_max, _MAX_TAVILY_MAX)
 
+    k2_num_queries = request.args.get("k2_queries", default=_DEFAULT_K2_QUERIES, type=int)
+    if k2_num_queries is None or k2_num_queries < 1:
+        k2_num_queries = _DEFAULT_K2_QUERIES
+    k2_num_queries = min(k2_num_queries, _MAX_K2_QUERIES)
+
+    # ── Step 1: Gamma → upsert ──
     out = _ingest_polymarket_gamma_rows()
-    raw, rows, n_ok, row_errors = out
+    raw, filtered, rows, n_ok, last = out
     if raw is None:
-        err_body, status = row_errors  # type: ignore[misc]
+        err_body, status = last  # type: ignore[misc]
         return err_body, status
 
     assert rows is not None and n_ok is not None
+    row_errors = last
 
     if row_errors:
         logger.warning(
@@ -142,6 +177,7 @@ def ingest_pipeline():
             len(rows),
         )
 
+    k2_stored = 0
     tavily_stored = 0
     gemini_stored = 0
     pipeline_errors: list[dict[str, Any]] = []
@@ -158,24 +194,54 @@ def ingest_pipeline():
                     description = m["description"]
                     desc_str = str(description) if description is not None else None
 
+                    market_dict = {
+                        "question": question,
+                        "description": desc_str or "",
+                    }
+
                     cur.execute(f"SAVEPOINT {sp}")
-                    stage = "tavily"
+                    stage = "k2_search_queries"
                     try:
-                        search_query = build_tavily_search_query(question, desc_str)
-                        results = tavily.search(search_query, max_results=tavily_max)
-                        tavily_id = insert_tavily_search(
+                        # ── Step 2: K2 generates targeted search queries ──
+                        search_queries = k2_svc.generate_search_queries(
+                            market_dict, num_queries=k2_num_queries,
+                        )
+                        k2_row_id = insert_k2_search_queries(
                             conn,
                             polymarket_id=polymarket_id,
-                            search_query=search_query,
-                            results=results,
-                            max_results=tavily_max,
+                            search_queries=search_queries,
+                            raw_k2_response=str(search_queries),
+                            num_queries_requested=k2_num_queries,
                         )
+                        k2_stored += 1
+
+                        # ── Step 3: Tavily search for each K2-generated query ──
+                        stage = "tavily"
+                        all_tavily_results: list[dict] = []
+                        last_tavily_id: int | None = None
+
+                        for sq in search_queries:
+                            results = tavily.search(sq, max_results=tavily_max)
+                            tid = insert_tavily_search(
+                                conn,
+                                polymarket_id=polymarket_id,
+                                search_query=sq,
+                                results=results,
+                                max_results=tavily_max,
+                                k2_search_query_id=k2_row_id,
+                            )
+                            all_tavily_results.extend(results)
+                            last_tavily_id = tid
+                            tavily_stored += 1
+
+                        # ── Step 4: Gemini thesis from aggregated Tavily results ──
                         stage = "gemini"
-                        reasoning_input = format_tavily_results_for_gemini(results)
-                        market_dict = {
-                            "question": question,
-                            "description": desc_str or "",
-                        }
+                        if last_tavily_id is None:
+                            raise RuntimeError("No Tavily searches completed")
+
+                        reasoning_input = format_tavily_results_for_gemini(
+                            all_tavily_results,
+                        )
                         thesis_text = generate_thesis(reasoning_input, market_dict)
                         if thesis_text is None:
                             thesis_text = ""
@@ -183,13 +249,13 @@ def ingest_pipeline():
                         insert_gemini_summary(
                             conn,
                             polymarket_id=polymarket_id,
-                            tavily_search_id=tavily_id,
+                            tavily_search_id=last_tavily_id,
                             thesis_text=thesis_text,
                             reasoning_input=reasoning_input,
                         )
                         cur.execute(f"RELEASE SAVEPOINT {sp}")
-                        tavily_stored += 1
                         gemini_stored += 1
+
                     except Exception as exc:
                         cur.execute(f"ROLLBACK TO SAVEPOINT {sp}")
                         logger.warning(
@@ -216,13 +282,16 @@ def ingest_pipeline():
     return jsonify(
         {
             "fetched": len(raw),
+            "after_filter": len(filtered),
             "parsed": len(rows),
             "upserted": n_ok,
             "upsert_failed": len(row_errors),
             "upsert_errors": row_errors,
             "research_limit": limit,
+            "k2_queries_per_market": k2_num_queries,
             "tavily_max_results": tavily_max,
             "markets_considered": len(candidates),
+            "k2_stored": k2_stored,
             "tavily_stored": tavily_stored,
             "gemini_stored": gemini_stored,
             "failed": len(pipeline_errors),
