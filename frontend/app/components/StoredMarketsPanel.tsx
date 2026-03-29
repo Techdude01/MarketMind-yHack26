@@ -83,7 +83,7 @@ function aiProb(newSentiment: number | null): number | null {
   return (newSentiment + 1) / 2;
 }
 
-/** Signed probability shift: positive = AI thinks Yes is underpriced. */
+/** Signed probability shift: positive = Buy Yes, negative = Buy No. */
 function probShift(m: DbMarket): number | null {
   const ai = aiProb(m.new_sentiment);
   const mp = m.market_prob ?? m.last_trade_price;
@@ -91,24 +91,30 @@ function probShift(m: DbMarket): number | null {
   return ai - mp;
 }
 
-function shiftColor(shift: number | null): string {
+/** Profit potential multiplier: 1 + abs(shift). */
+function profitMultiple(shift: number | null): number | null {
+  if (shift == null) return null;
+  return 1 + Math.abs(shift);
+}
+
+function profitColor(shift: number | null): string {
   if (shift == null) return MM.ghost;
   const abs = Math.abs(shift);
-  if (abs >= 0.15) return shift > 0 ? MM.green : MM.red;
+  if (abs >= 0.15) return MM.green;
   if (abs >= 0.05) return MM.amber;
   return MM.dim;
 }
 
-function shiftLabel(shift: number | null): string {
-  if (shift == null) return "—";
-  const sign = shift >= 0 ? "+" : "";
-  return `${sign}${Math.round(shift * 100)}%`;
+function profitLabel(shift: number | null): string {
+  const m = profitMultiple(shift);
+  if (m == null) return "—";
+  return `${m.toFixed(2)}x`;
 }
 
-function shiftTag(shift: number | null): string {
+function tradeDirection(shift: number | null): string {
   if (shift == null) return "";
-  if (Math.abs(shift) < 0.05) return "aligned";
-  return shift > 0 ? "underpriced" : "overpriced";
+  if (Math.abs(shift) < 0.05) return "Hold";
+  return shift > 0 ? "Buy Yes" : "Buy No";
 }
 
 function sortMarkets(markets: DbMarket[], key: SortKey): DbMarket[] {
@@ -116,7 +122,7 @@ function sortMarkets(markets: DbMarket[], key: SortKey): DbMarket[] {
   switch (key) {
     case "divergence":
       return copy.sort(
-        (a, b) => Math.abs(probShift(b) ?? 0) - Math.abs(probShift(a) ?? 0)
+        (a, b) => (profitMultiple(probShift(b)) ?? 0) - (profitMultiple(probShift(a)) ?? 0)
       );
     case "volume":
       return copy.sort(
@@ -235,7 +241,7 @@ export function StoredMarketsPanel() {
           <span style={{ fontSize: 12, color: MM.dim }}>Sort:</span>
           {(
             [
-              ["divergence", "Divergence"],
+              ["divergence", "Profit Potential"],
               ["volume", "Volume"],
               ["price", "Odds"],
             ] as [SortKey, string][]
@@ -383,8 +389,6 @@ function FeaturedCard({ m }: { m: DbMarket }) {
   const noP = 1 - yesP;
   const vol = compactVol(m.volume_num ?? m.volume ?? null);
   const shift = probShift(m);
-  const ai = aiProb(m.new_sentiment);
-  const mp = m.market_prob ?? m.last_trade_price;
 
   return (
     <div
@@ -419,22 +423,22 @@ function FeaturedCard({ m }: { m: DbMarket }) {
           position: "absolute", inset: 0,
           background: "linear-gradient(0deg, rgba(12,12,14,0.95) 0%, rgba(12,12,14,0.2) 50%, transparent 100%)",
         }} />
-        {/* Divergence badge */}
+        {/* Profit potential badge */}
         <div style={{
           position: "absolute", top: 10, right: 10,
           display: "flex", alignItems: "center", gap: 6,
           background: "rgba(0,0,0,0.65)", backdropFilter: "blur(6px)",
           padding: "5px 10px", borderRadius: 6,
           fontSize: 11, fontWeight: 600, fontFamily: MM.font,
-          color: shiftColor(shift),
+          color: profitColor(shift),
         }}>
           <span style={{
             width: 6, height: 6, borderRadius: "50%",
-            background: shiftColor(shift),
+            background: profitColor(shift),
           }} />
-          {shiftLabel(shift)}
+          {profitLabel(shift)}
           {shift != null && Math.abs(shift) >= 0.05 && (
-            <span style={{ fontSize: 9, opacity: 0.8 }}>{shiftTag(shift)}</span>
+            <span style={{ fontSize: 9, opacity: 0.8 }}>{tradeDirection(shift)}</span>
           )}
         </div>
         {/* Volume badge */}
@@ -479,16 +483,15 @@ function FeaturedCard({ m }: { m: DbMarket }) {
             No {pct(noP)}
           </span>
         </div>
-        {/* AI vs Market probabilities */}
-        {ai != null && mp != null && (
-          <div style={{
-            display: "flex", alignItems: "center", gap: 6,
-            fontSize: 10, fontFamily: MM.font, color: MM.textSub,
+        {shift != null && Math.abs(shift) >= 0.05 && (
+          <span style={{
+            fontSize: 10, fontWeight: 600, fontFamily: MM.font,
+            color: profitColor(shift),
+            padding: "2px 8px", borderRadius: 4,
+            border: `1px solid ${profitColor(shift)}33`,
           }}>
-            <span>AI {pct(ai)}</span>
-            <span style={{ color: shiftColor(shift), fontSize: 12 }}>→</span>
-            <span>Mkt {pct(mp)}</span>
-          </div>
+            {tradeDirection(shift)}
+          </span>
         )}
       </div>
     </div>
@@ -537,20 +540,20 @@ function MarketCard({ m }: { m: DbMarket }) {
             style={{ width: "100%", height: "100%", objectFit: "cover", opacity: hovered ? 1 : 0.85, transition: "opacity 0.2s" }}
           />
         ) : null}
-        {/* Divergence badge */}
+        {/* Profit potential badge */}
         <div style={{
           position: "absolute", top: 8, right: 8,
           display: "flex", alignItems: "center", gap: 4,
           background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)",
           padding: "3px 8px", borderRadius: 5,
           fontSize: 10, fontWeight: 600, fontFamily: MM.font,
-          color: shiftColor(shift),
+          color: profitColor(shift),
         }}>
           <span style={{
             width: 5, height: 5, borderRadius: "50%",
-            background: shiftColor(shift),
+            background: profitColor(shift),
           }} />
-          {shiftLabel(shift)}
+          {profitLabel(shift)}
         </div>
       </div>
 
@@ -594,8 +597,8 @@ function MarketCard({ m }: { m: DbMarket }) {
         }}>
           <span>{vol} Vol</span>
           {shift != null && Math.abs(shift) >= 0.05 && (
-            <span style={{ color: shiftColor(shift), fontSize: 10, fontWeight: 600 }}>
-              {shiftTag(shift)}
+            <span style={{ color: profitColor(shift), fontSize: 10, fontWeight: 600 }}>
+              {tradeDirection(shift)}
             </span>
           )}
         </div>

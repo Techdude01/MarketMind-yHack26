@@ -314,24 +314,29 @@ function probShiftFromSentiment(
   return ai - marketProb;
 }
 
-function shiftColor(shift: number | null): string {
+function profitMultiple(shift: number | null): number | null {
+  if (shift == null) return null;
+  return 1 + Math.abs(shift);
+}
+
+function profitColor(shift: number | null): string {
   if (shift == null) return MM.ghost;
   const abs = Math.abs(shift);
-  if (abs >= 0.15) return shift > 0 ? MM.green : MM.red;
+  if (abs >= 0.15) return MM.green;
   if (abs >= 0.05) return MM.yellow;
   return MM.dim;
 }
 
-function shiftLabel(shift: number | null): string {
-  if (shift == null) return "—";
-  const sign = shift >= 0 ? "+" : "";
-  return `${sign}${Math.round(shift * 100)}%`;
+function profitLabel(shift: number | null): string {
+  const m = profitMultiple(shift);
+  if (m == null) return "—";
+  return `${m.toFixed(2)}x`;
 }
 
-function shiftTag(shift: number | null): string {
+function tradeDirection(shift: number | null): string {
   if (shift == null) return "";
-  if (Math.abs(shift) < 0.05) return "aligned";
-  return shift > 0 ? "underpriced" : "overpriced";
+  if (Math.abs(shift) < 0.05) return "Hold";
+  return shift > 0 ? "Buy Yes" : "Buy No";
 }
 
 function pctFmt(n: number | null | undefined): string {
@@ -976,10 +981,10 @@ export default function MarketDetailPage() {
               <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 2 }}>
                 <StatCell label="CURRENT_ODDS" value={signal.impliedProb != null ? signal.impliedProb.toFixed(2) : "—"} />
                 <StatCell
-                  label="AI_PROB"
+                  label="PROFIT_POTENTIAL"
                   value={
                     sentimentAnalysis
-                      ? pctFmt(aiProbFromSentiment(sentimentAnalysis.new_sentiment))
+                      ? profitLabel(probShiftFromSentiment(sentimentAnalysis.new_sentiment, market.last_trade_price))
                       : "—"
                   }
                 />
@@ -1041,25 +1046,33 @@ export default function MarketDetailPage() {
                     const aiP = aiProbFromSentiment(sentimentAnalysis.new_sentiment);
                     const mktP = market.last_trade_price;
                     const shift = probShiftFromSentiment(sentimentAnalysis.new_sentiment, mktP);
-                    const sColor = shiftColor(shift);
+                    const pColor = profitColor(shift);
                     return (
                       <>
-                        {/* Divergence headline */}
+                        {/* Profit potential headline */}
                         <div style={{
                           display: "flex", alignItems: "center", gap: 8,
                           marginBottom: 14, padding: "10px 12px",
-                          background: `${sColor}11`, border: `1px solid ${sColor}33`,
+                          background: `${pColor}11`, border: `1px solid ${pColor}33`,
                         }}>
                           <span style={{
                             width: 8, height: 8, borderRadius: "50%",
-                            background: sColor, flexShrink: 0,
+                            background: pColor, flexShrink: 0,
                           }} />
-                          <span style={{ fontSize: 18, fontWeight: 700, color: sColor }}>
-                            {shiftLabel(shift)}
+                          <span style={{ fontSize: 18, fontWeight: 700, color: pColor }}>
+                            {profitLabel(shift)}
+                          </span>
+                          <span style={{ fontSize: 12, color: pColor, opacity: 0.9 }}>
+                            profit potential
                           </span>
                           {shift != null && Math.abs(shift) >= 0.05 && (
-                            <span style={{ fontSize: 11, color: sColor, opacity: 0.85 }}>
-                              {shiftTag(shift)}
+                            <span style={{
+                              fontSize: 10, fontWeight: 600, color: pColor,
+                              padding: "2px 8px", borderRadius: 4,
+                              border: `1px solid ${pColor}33`,
+                              marginLeft: 4,
+                            }}>
+                              {tradeDirection(shift)}
                             </span>
                           )}
                         </div>
@@ -1078,7 +1091,7 @@ export default function MarketDetailPage() {
                           </div>
                           <div style={{
                             display: "flex", alignItems: "center",
-                            fontSize: 16, color: sColor, fontWeight: 700,
+                            fontSize: 16, color: pColor, fontWeight: 700,
                           }}>→</div>
                           <div style={{
                             flex: 1, background: MM.surface2, border: `1px solid ${MM.border}`,
@@ -1174,19 +1187,20 @@ export default function MarketDetailPage() {
                 const shift = sentimentAnalysis
                   ? probShiftFromSentiment(sentimentAnalysis.new_sentiment, market.last_trade_price)
                   : null;
-                const sColor = shiftColor(shift);
+                const pColor = profitColor(shift);
+                const dir = tradeDirection(shift);
                 return (
                   <SignalCell
-                    label="divergence"
-                    value={shiftLabel(shift)}
+                    label="profit_potential"
+                    value={profitLabel(shift)}
                     sub={
                       shift != null && Math.abs(shift) >= 0.05
-                        ? `AI says Yes is ${shiftTag(shift)}`
+                        ? `Signal: ${dir}`
                         : shift != null
                         ? "AI and market aligned"
                         : "run analysis to compute"
                     }
-                    accent={sColor}
+                    accent={pColor}
                   />
                 );
               })()}
