@@ -7,11 +7,13 @@ import requests
 from flask import Blueprint, jsonify, request
 
 from app.repositories.market_research import (
+    get_latest_tavily,
+    get_latest_thesis,
     insert_gemini_summary,
     insert_tavily_search,
     list_markets_for_research,
 )
-from app.repositories.polymarket_markets import upsert_markets
+from app.repositories.polymarket_markets import get_market_by_id, upsert_markets
 from app.services.llm.gemini import generate_thesis
 from app.services.polymarket_gamma import fetch_filtered_markets, rows_for_upsert
 from app.services.research_context import (
@@ -75,6 +77,87 @@ def _ingest_polymarket_gamma_rows() -> (
         )
 
     return raw, rows, n_ok, row_errors
+
+
+@ingest_bp.route("/research/<int:polymarket_id>", methods=["POST"])
+def research_single_market(polymarket_id: int):
+    """
+    Run Tavily search + Gemini thesis for a single market.
+    ---
+    tags:
+      - Ingest
+    summary: Analyze one market — Tavily + Gemini pipeline
+    parameters:
+      - name: polymarket_id
+        in: path
+        required: true
+        type: integer
+      - name: tavily_max
+        in: query
+        type: integer
+        default: 5
+    responses:
+      200:
+        description: Thesis and news generated
+      404:
+        description: Market not found in database
+      503:
+        description: Database or upstream error
+    """
+    from db import get_connection
+
+    tavily_max = min(
+        request.args.get("tavily_max", default=_DEFAULT_TAVILY_MAX, type=int) or _DEFAULT_TAVILY_MAX,
+        _MAX_TAVILY_MAX,
+    )
+
+    try:
+        with get_connection() as conn:
+            market = get_market_by_id(conn, polymarket_id)
+            if market is None:
+                return jsonify({"error": "Market not found", "code": "NOT_FOUND"}), 404
+
+            question = str(market.get("question") or "")
+            description = market.get("description")
+            desc_str = str(description) if description is not None else None
+
+            search_query = build_tavily_search_query(question, desc_str)
+            results = tavily.search(search_query, max_results=tavily_max)
+
+            tavily_id = insert_tavily_search(
+                conn,
+                polymarket_id=polymarket_id,
+                search_query=search_query,
+                results=results,
+                max_results=tavily_max,
+            )
+
+            reasoning_input = format_tavily_results_for_gemini(results)
+            market_dict = {"question": question, "description": desc_str or ""}
+            thesis_text = generate_thesis(reasoning_input, market_dict) or ""
+
+            insert_gemini_summary(
+                conn,
+                polymarket_id=polymarket_id,
+                tavily_search_id=tavily_id,
+                thesis_text=thesis_text,
+                reasoning_input=reasoning_input,
+            )
+            conn.commit()
+
+            thesis = get_latest_thesis(conn, polymarket_id)
+            news_results = get_latest_tavily(conn, polymarket_id)
+
+    except Exception as exc:
+        logger.exception("research_single_market failed for %s", polymarket_id)
+        return jsonify({"error": str(exc), "code": "PIPELINE_ERROR"}), 503
+
+    news = sorted(
+        (r for r in news_results if isinstance(r, dict)),
+        key=lambda r: float(r.get("score", 0)),
+        reverse=True,
+    )
+    return jsonify({"market_id": polymarket_id, "thesis": thesis, "news": news}), 200
 
 
 @ingest_bp.route("/markets", methods=["POST"])

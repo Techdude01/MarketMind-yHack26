@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 const defaultBase =
@@ -240,17 +241,33 @@ export function StoredMarketsPanel({ title = "Markets" }: Props) {
 }
 
 function MarketCard({ m }: { m: DbMarket }) {
+  const router = useRouter();
   const [hovered, setHovered] = useState(false);
+
+  const handleClick = () => router.push(`/markets/${m.polymarket_id}`);
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" || e.key === " ") handleClick();
+  };
+
   return (
     <li
+      role="button"
+      tabIndex={0}
+      aria-label={m.question}
+      onClick={handleClick}
+      onKeyDown={handleKeyDown}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        display: "flex", flexDirection: "column", overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
         border: `1px solid ${hovered ? MM.borderBright : MM.border}`,
         borderLeft: `2px solid ${hovered ? MM.green : "transparent"}`,
-        background: MM.surface, borderRadius: 0,
+        background: MM.surface,
+        borderRadius: 0,
         transition: "border-color 0.2s, border-left-color 0.2s",
+        cursor: "pointer",
       }}
     >
       {/* Image */}
