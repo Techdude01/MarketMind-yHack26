@@ -1,5 +1,7 @@
 from flask import Blueprint, jsonify, request
 
+from app.services.payoff import compute_payoff_result
+
 payoff_bp = Blueprint("payoff", __name__)
 
 
@@ -68,13 +70,14 @@ def compute_payoff():
                   type: string
                   example: "MISSING_FIELDS"
     """
-    # TODO: add @requires_auth, implement payoff math from CLAUDE.md
     data = request.get_json(silent=True) or {}
     market_id = data.get("marketId")
     position_size = data.get("positionSize")
     side = data.get("side")
+    entry_price = data.get("entryPrice")
+    agent_confidence = data.get("agentConfidence")
 
-    if not all([market_id, position_size, side]):
+    if market_id is None or position_size is None or side is None:
         return jsonify(
             {
                 "error": "Missing required fields: marketId, positionSize, side",
@@ -82,9 +85,34 @@ def compute_payoff():
             }
         ), 400
 
+    try:
+      size = float(position_size)
+      ep = float(entry_price) if entry_price is not None else 0.5
+      conf = float(agent_confidence) if agent_confidence is not None else 0.5
+    except (TypeError, ValueError):
+      return jsonify({"error": "Invalid numeric inputs", "code": "INVALID_INPUT"}), 400
+
+    if side not in {"YES", "NO"}:
+      return jsonify({"error": "side must be YES or NO", "code": "INVALID_SIDE"}), 400
+
+    result = compute_payoff_result(
+      entry_price=ep,
+      position_size=size,
+      agent_confidence=conf,
+    )
+
     return jsonify(
         {
             "market_id": market_id,
-            "message": "stub — payoff engine not yet implemented",
+        "side": side,
+        "entry_price": result.entry_price,
+        "position_size": result.position_size,
+        "agent_confidence": result.agent_confidence,
+        "max_payout": result.max_payout,
+        "cost": result.cost,
+        "breakeven": result.breakeven,
+        "expected_value": result.expected_value,
+        "roi": result.roi,
+        "pnl_curve": result.pnl_curve,
         }
     ), 200

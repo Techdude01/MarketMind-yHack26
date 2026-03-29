@@ -20,6 +20,7 @@ from app.services.llm.k2_agent import (
     extract_tavily_hits_from_langgraph_messages,
     thesis_markdown_for_display,
 )
+from app.services.thesis_parse import parse_structured_thesis_fields
 
 DEFAULT_TAVILY_MAX = 5
 MAX_TAVILY_MAX = 15
@@ -146,6 +147,9 @@ def run_market_analysis(
         raise AnalysisPipelineError("agent", exc) from exc
 
     thesis = get_latest_thesis(conn, polymarket_id)
+    if isinstance(thesis, dict):
+        structured = parse_structured_thesis_fields(thesis.get("thesis_text"))
+        thesis = {**thesis, **structured}
     news_results = get_latest_tavily(conn, polymarket_id)
     news = sorted(
         (r for r in news_results if isinstance(r, dict)),
