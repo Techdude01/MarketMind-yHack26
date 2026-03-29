@@ -1,6 +1,7 @@
 """Ingestion routes — Gamma API → Postgres; optional batch analysis via analyze service."""
 
 import logging
+from multiprocessing import Pool
 from typing import Any
 
 import requests
@@ -27,6 +28,39 @@ ingest_bp = Blueprint("ingest", __name__, url_prefix="/ingest")
 
 _DEFAULT_RESEARCH_LIMIT = 20
 _MAX_RESEARCH_LIMIT = 200
+_HOMEPAGE_ANALYSIS_PROCESSES = 6
+
+
+def _run_homepage_market_analysis_task(polymarket_id: int, tavily_max: int) -> dict[str, Any]:
+    """Process-pool worker: one connection + commit per market (must be picklable)."""
+    from db import get_connection
+
+    try:
+        with get_connection() as conn:
+            run_market_analysis(conn, polymarket_id, tavily_max=tavily_max)
+            conn.commit()
+    except AnalysisPipelineError as exc:
+        logger.warning(
+            "Homepage-pipeline analysis failed for %s (stage=%s): %s",
+            polymarket_id,
+            exc.stage,
+            exc.cause,
+        )
+        return {
+            "ok": False,
+            "polymarket_id": polymarket_id,
+            "stage": exc.stage,
+            "error": str(exc.cause),
+        }
+    except Exception as exc:
+        logger.warning("Homepage-pipeline analysis failed for %s: %s", polymarket_id, exc)
+        return {
+            "ok": False,
+            "polymarket_id": polymarket_id,
+            "stage": "unknown",
+            "error": str(exc),
+        }
+    return {"ok": True, "polymarket_id": polymarket_id}
 
 
 def _ingest_polymarket_gamma_rows() -> (
@@ -290,60 +324,37 @@ def ingest_homepage_pipeline():
     analyzed = 0
     skipped = 0
     hp_ids: list[int] = []
+    to_analyze: list[int] = []
     pipeline_errors: list[dict[str, Any]] = []
 
     try:
         with get_connection() as conn:
             hp_ids = list_homepage_polymarket_ids(conn)
-            with conn.cursor() as cur:
-                for i, pid in enumerate(hp_ids):
-                    if not force and has_analysis(conn, pid):
-                        skipped += 1
-                        continue
-
-                    sp = f"hp_{i}"
-                    cur.execute(f"SAVEPOINT {sp}")
-                    try:
-                        run_market_analysis(
-                            conn,
-                            pid,
-                            tavily_max=tavily_max,
-                        )
-                        cur.execute(f"RELEASE SAVEPOINT {sp}")
-                        analyzed += 1
-                    except AnalysisPipelineError as exc:
-                        cur.execute(f"ROLLBACK TO SAVEPOINT {sp}")
-                        logger.warning(
-                            "Homepage-pipeline analysis failed for %s (stage=%s): %s",
-                            pid,
-                            exc.stage,
-                            exc.cause,
-                        )
-                        pipeline_errors.append(
-                            {
-                                "polymarket_id": pid,
-                                "stage": exc.stage,
-                                "error": str(exc.cause),
-                            }
-                        )
-                    except Exception as exc:
-                        cur.execute(f"ROLLBACK TO SAVEPOINT {sp}")
-                        logger.warning(
-                            "Homepage-pipeline analysis failed for %s: %s",
-                            pid,
-                            exc,
-                        )
-                        pipeline_errors.append(
-                            {
-                                "polymarket_id": pid,
-                                "stage": "unknown",
-                                "error": str(exc),
-                            }
-                        )
-            conn.commit()
+            for pid in hp_ids:
+                if not force and has_analysis(conn, pid):
+                    skipped += 1
+                    continue
+                to_analyze.append(pid)
     except Exception as exc:
         logger.exception("Homepage-pipeline database error")
         return jsonify({"error": str(exc), "code": "DATABASE_ERROR"}), 503
+
+    if to_analyze:
+        n_workers = min(_HOMEPAGE_ANALYSIS_PROCESSES, len(to_analyze))
+        args = [(pid, tavily_max) for pid in to_analyze]
+        with Pool(processes=n_workers) as pool:
+            results = pool.starmap(_run_homepage_market_analysis_task, args)
+        for r in results:
+            if r.get("ok"):
+                analyzed += 1
+            else:
+                pipeline_errors.append(
+                    {
+                        "polymarket_id": r["polymarket_id"],
+                        "stage": r["stage"],
+                        "error": r["error"],
+                    }
+                )
 
     return jsonify(
         {

@@ -8,6 +8,7 @@ from typing import Any
 from flask import Blueprint, jsonify, request
 
 from app.repositories.homepage_markets import list_homepage_markets
+from app.repositories.market_research import get_latest_tavily, get_latest_thesis
 from app.repositories.polymarket_markets import get_market_by_id, list_top_markets
 from app.services.payoff import compute_payoff_result
 from app.services.polymarket import get_prices_history
