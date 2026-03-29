@@ -14,7 +14,7 @@ from app.repositories.market_research import (
     list_markets_for_research,
 )
 from app.repositories.polymarket_markets import get_market_by_id, upsert_markets
-from app.services.llm.gemini import generate_thesis
+from app.services.llm import k2 as k2_svc
 from app.services.polymarket_gamma import fetch_filtered_markets, rows_for_upsert
 from app.services.research_context import (
     build_tavily_search_query,
@@ -30,6 +30,20 @@ _DEFAULT_RESEARCH_LIMIT = 20
 _MAX_RESEARCH_LIMIT = 200
 _DEFAULT_TAVILY_MAX = 5
 _MAX_TAVILY_MAX = 15
+_K2_MODEL = "MBZUAI-IFM/K2-Think-v2"
+
+
+def _generate_k2_thesis(
+    *, question: str, description: str | None, reasoning_input: str
+) -> str:
+    """Generate thesis text with K2 using Tavily context."""
+    desc = description or ""
+    market_context = {
+        "question": question,
+        "description": f"{desc}\n\n## Tavily Research Context\n{reasoning_input}",
+    }
+    thesis_text = k2_svc.reason(market_context)
+    return thesis_text or ""
 
 
 def _ingest_polymarket_gamma_rows() -> (
@@ -82,11 +96,11 @@ def _ingest_polymarket_gamma_rows() -> (
 @ingest_bp.route("/research/<int:polymarket_id>", methods=["POST"])
 def research_single_market(polymarket_id: int):
     """
-    Run Tavily search + Gemini thesis for a single market.
+    Run Tavily search + K2 thesis for a single market.
     ---
     tags:
       - Ingest
-    summary: Analyze one market — Tavily + Gemini pipeline
+    summary: Analyze one market — Tavily + K2 pipeline
     parameters:
       - name: polymarket_id
         in: path
@@ -133,8 +147,11 @@ def research_single_market(polymarket_id: int):
             )
 
             reasoning_input = format_tavily_results_for_gemini(results)
-            market_dict = {"question": question, "description": desc_str or ""}
-            thesis_text = generate_thesis(reasoning_input, market_dict) or ""
+            thesis_text = _generate_k2_thesis(
+                question=question,
+                description=desc_str,
+                reasoning_input=reasoning_input,
+            )
 
             insert_gemini_summary(
                 conn,
@@ -142,6 +159,7 @@ def research_single_market(polymarket_id: int):
                 tavily_search_id=tavily_id,
                 thesis_text=thesis_text,
                 reasoning_input=reasoning_input,
+                model=_K2_MODEL,
             )
             conn.commit()
 
@@ -192,7 +210,7 @@ def ingest_markets():
 @ingest_bp.route("/pipeline", methods=["POST"])
 def ingest_pipeline():
     """
-    Gamma upsert, then Tavily search + Gemini thesis for top markets by volume.
+    Gamma upsert, then Tavily search + K2 thesis for top markets by volume.
 
     Query params:
         limit — max markets to run research on (default 20, max 200)
@@ -226,7 +244,7 @@ def ingest_pipeline():
         )
 
     tavily_stored = 0
-    gemini_stored = 0
+    k2_stored = 0
     pipeline_errors: list[dict[str, Any]] = []
     candidates: list[dict[str, Any]] = []
 
@@ -253,15 +271,13 @@ def ingest_pipeline():
                             results=results,
                             max_results=tavily_max,
                         )
-                        stage = "gemini"
+                        stage = "k2"
                         reasoning_input = format_tavily_results_for_gemini(results)
-                        market_dict = {
-                            "question": question,
-                            "description": desc_str or "",
-                        }
-                        thesis_text = generate_thesis(reasoning_input, market_dict)
-                        if thesis_text is None:
-                            thesis_text = ""
+                        thesis_text = _generate_k2_thesis(
+                            question=question,
+                            description=desc_str,
+                            reasoning_input=reasoning_input,
+                        )
 
                         insert_gemini_summary(
                             conn,
@@ -269,10 +285,11 @@ def ingest_pipeline():
                             tavily_search_id=tavily_id,
                             thesis_text=thesis_text,
                             reasoning_input=reasoning_input,
+                            model=_K2_MODEL,
                         )
                         cur.execute(f"RELEASE SAVEPOINT {sp}")
                         tavily_stored += 1
-                        gemini_stored += 1
+                        k2_stored += 1
                     except Exception as exc:
                         cur.execute(f"ROLLBACK TO SAVEPOINT {sp}")
                         logger.warning(
@@ -307,7 +324,7 @@ def ingest_pipeline():
             "tavily_max_results": tavily_max,
             "markets_considered": len(candidates),
             "tavily_stored": tavily_stored,
-            "gemini_stored": gemini_stored,
+            "k2_stored": k2_stored,
             "failed": len(pipeline_errors),
             "errors": pipeline_errors,
             "sample_polymarket_ids": sample_ids,

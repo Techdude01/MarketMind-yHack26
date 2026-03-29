@@ -668,7 +668,7 @@ export default function MarketDetailPage() {
         >
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <span style={{ fontSize: 11, color: MM.textSub }}>
-              Run Tavily search + Gemini thesis for this market
+              Run Tavily search + K2 thesis for this market
             </span>
             {analyzeError && (
               <span style={{ fontSize: 10, color: MM.red }}>{analyzeError}</span>
