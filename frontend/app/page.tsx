@@ -1,5 +1,5 @@
-import { StoredMarketsPanel } from "./components/StoredMarketsPanel";
+import LandingPage from "./components/landing/LandingPage";
 
 export default function Home() {
-  return <StoredMarketsPanel title="MarketMind — stored markets" />;
+  return <LandingPage />;
 }
