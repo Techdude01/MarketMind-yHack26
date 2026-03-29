@@ -1,0 +1,4 @@
+summary,market_category,market_prob,label_actionable
+"Amazon sold off on AI capex concerns, while AWS growth remained solid.",stocks,0.29,false
+"Fed commentary stayed cautious, but inflation data cooled faster than expected.",economics,0.62,true
+"Post-debate public reaction turned sharply negative for candidate X.",politics,0.44,true
