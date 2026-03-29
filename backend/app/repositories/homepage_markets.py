@@ -1,30 +1,86 @@
-"""Homepage market selection — scoring and Postgres access.
-
-Hard filtering is handled upstream by ``polymarket_gamma.filter_and_rank_markets``
-before this module is called.  This module only scores and persists the homepage
-subset.
-"""
+"""Homepage market selection — filtering, scoring, and Postgres access."""
 
 from __future__ import annotations
 
+import math
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from app.services.polymarket_gamma import score_market
+# ---------------------------------------------------------------------------
+# Filtering & scoring helpers
+# ---------------------------------------------------------------------------
 
+_VOLUME_FLOOR = 1_000_000
+_PRICE_LO = 0.05
+_PRICE_HI = 0.95
 _TOP_N = 20
 
 
-def select_homepage_markets(
-    pre_filtered: list[dict[str, Any]], *, top_n: int = _TOP_N
-) -> list[tuple[int, float]]:
-    """Return ``(polymarket_id, demo_score)`` pairs for the best homepage markets.
+def _to_float(v: Any) -> float | None:
+    if v is None:
+        return None
+    if isinstance(v, Decimal):
+        return float(v)
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
 
-    Expects input already passed through ``filter_and_rank_markets``.
-    """
-    scored: list[tuple[int, float]] = []
-    for m in pre_filtered:
+
+def is_good_homepage_market(market: dict[str, Any]) -> bool:
+    """Hard-filter a market dict (raw Gamma keys) for homepage eligibility."""
+    if not market.get("active", False):
+        return False
+    if market.get("closed", True):
+        return False
+    if not market.get("acceptingOrders", False):
+        return False
+    if market.get("archived", True):
+        return False
+
+    vol = _to_float(market.get("volumeNum"))
+    if vol is None or vol < _VOLUME_FLOOR:
+        return False
+
+    bid = _to_float(market.get("bestBid"))
+    ask = _to_float(market.get("bestAsk"))
+    if bid is None or ask is None:
+        return False
+
+    ltp = _to_float(market.get("lastTradePrice"))
+    if ltp is None or ltp < _PRICE_LO or ltp > _PRICE_HI:
+        return False
+
+    return True
+
+
+def score_homepage_market(market: dict[str, Any]) -> float:
+    """Soft-rank a market dict that already passed hard filters."""
+    vol = _to_float(market.get("volumeNum")) or 1
+    score = math.log(vol + 1)
+
+    if market.get("featured"):
+        score += 2.0
+
+    vol24 = _to_float(market.get("volume24hr"))
+    vol1w = _to_float(market.get("volume1wk"))
+    if vol24 and vol24 > 100_000:
+        score += 1.0
+    elif vol1w and vol1w > 500_000:
+        score += 0.5
+
+    return round(score, 4)
+
+
+def select_homepage_markets(
+    raw_markets: list[dict[str, Any]], *, top_n: int = _TOP_N
+) -> list[tuple[int, float]]:
+    """Return ``(polymarket_id, demo_score)`` pairs for the best homepage markets."""
+    eligible: list[tuple[int, float]] = []
+    for m in raw_markets:
+        if not is_good_homepage_market(m):
+            continue
         pid = m.get("id")
         if pid is None:
             continue
@@ -32,10 +88,10 @@ def select_homepage_markets(
             pid = int(pid)
         except (TypeError, ValueError):
             continue
-        scored.append((pid, round(score_market(m), 4)))
+        eligible.append((pid, score_homepage_market(m)))
 
-    scored.sort(key=lambda t: t[1], reverse=True)
-    return scored[:top_n]
+    eligible.sort(key=lambda t: t[1], reverse=True)
+    return eligible[:top_n]
 
 
 # ---------------------------------------------------------------------------
