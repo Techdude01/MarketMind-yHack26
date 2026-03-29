@@ -1,3 +1,4 @@
+"""Ingestion routes — Gamma API → Postgres; optional batch analysis via analyze service."""
 """Ingestion routes — Gamma API → Postgres; K2 → Tavily → Gemini pipeline."""
 
 import logging
@@ -6,26 +7,15 @@ from typing import Any
 import requests
 from flask import Blueprint, jsonify, request
 
-from app.repositories.market_research import (
-    insert_gemini_summary,
-    insert_k2_search_queries,
-    insert_tavily_search,
-    list_markets_for_research,
-)
+from app.repositories.market_research import list_markets_for_research
 from app.repositories.polymarket_markets import upsert_markets
-from app.services.llm import k2 as k2_svc
-from app.services.llm.gemini import generate_thesis
-from app.services.polymarket_gamma import (
-    DEMO_MARKETS_TOP_N,
-    fetch_filtered_markets,
-    filter_and_rank_markets_for_demo,
-    rows_for_upsert,
+from app.services.analyze import (
+    DEFAULT_TAVILY_MAX,
+    AnalysisPipelineError,
+    clamp_tavily_max,
+    run_market_analysis,
 )
-from app.services.research_context import (
-    build_tavily_search_query,
-    format_tavily_results_for_gemini,
-)
-from app.services import tavily
+from app.services.polymarket_gamma import fetch_filtered_markets, rows_for_upsert
 
 logger = logging.getLogger(__name__)
 
@@ -33,10 +23,6 @@ ingest_bp = Blueprint("ingest", __name__, url_prefix="/ingest")
 
 _DEFAULT_RESEARCH_LIMIT = 20
 _MAX_RESEARCH_LIMIT = 200
-_DEFAULT_TAVILY_MAX = 5
-_MAX_TAVILY_MAX = 15
-_DEFAULT_K2_QUERIES = 4
-_MAX_K2_QUERIES = 8
 
 
 def _ingest_polymarket_gamma_rows() -> (
@@ -97,7 +83,7 @@ def _ingest_polymarket_gamma_rows() -> (
             503,
         )
 
-    return raw, filtered, rows, n_ok, row_errors
+    return raw, rows, n_ok, row_errors
 
 
 @ingest_bp.route("/markets", methods=["POST"])
@@ -134,12 +120,11 @@ def ingest_markets():
 @ingest_bp.route("/pipeline", methods=["POST"])
 def ingest_pipeline():
     """
-    Full research pipeline: Gamma upsert → K2 search-query generation →
-    Tavily searches → Gemini thesis for top markets by volume.
+    Gamma upsert, then K2 ReAct agent analysis for top markets by volume.
 
     Query params:
         limit      — max markets to research (default 20, max 200)
-        tavily_max — Tavily max_results per query (default 5, max 15)
+        tavily_max — Tavily tool max_results per query (default 5, max 15)
         k2_queries — number of search queries K2 should generate per market
                      (default 4, max 8)
     """
@@ -150,10 +135,8 @@ def ingest_pipeline():
         limit = _DEFAULT_RESEARCH_LIMIT
     limit = min(limit, _MAX_RESEARCH_LIMIT)
 
-    tavily_max = request.args.get("tavily_max", default=_DEFAULT_TAVILY_MAX, type=int)
-    if tavily_max is None or tavily_max < 1:
-        tavily_max = _DEFAULT_TAVILY_MAX
-    tavily_max = min(tavily_max, _MAX_TAVILY_MAX)
+    raw_tm = request.args.get("tavily_max", default=DEFAULT_TAVILY_MAX, type=int)
+    tavily_max = clamp_tavily_max(raw_tm)
 
     k2_num_queries = request.args.get("k2_queries", default=_DEFAULT_K2_QUERIES, type=int)
     if k2_num_queries is None or k2_num_queries < 1:
@@ -179,7 +162,7 @@ def ingest_pipeline():
 
     k2_stored = 0
     tavily_stored = 0
-    gemini_stored = 0
+    agent_stored = 0
     pipeline_errors: list[dict[str, Any]] = []
     candidates: list[dict[str, Any]] = []
 
@@ -190,84 +173,43 @@ def ingest_pipeline():
                 for i, m in enumerate(candidates):
                     sp = f"pipe_{i}"
                     polymarket_id = int(m["polymarket_id"])
-                    question = str(m["question"] or "")
-                    description = m["description"]
-                    desc_str = str(description) if description is not None else None
-
-                    market_dict = {
-                        "question": question,
-                        "description": desc_str or "",
-                    }
-
                     cur.execute(f"SAVEPOINT {sp}")
-                    stage = "k2_search_queries"
                     try:
-                        # ── Step 2: K2 generates targeted search queries ──
-                        search_queries = k2_svc.generate_search_queries(
-                            market_dict, num_queries=k2_num_queries,
-                        )
-                        k2_row_id = insert_k2_search_queries(
+                        run_market_analysis(
                             conn,
-                            polymarket_id=polymarket_id,
-                            search_queries=search_queries,
-                            raw_k2_response=str(search_queries),
-                            num_queries_requested=k2_num_queries,
-                        )
-                        k2_stored += 1
-
-                        # ── Step 3: Tavily search for each K2-generated query ──
-                        stage = "tavily"
-                        all_tavily_results: list[dict] = []
-                        last_tavily_id: int | None = None
-
-                        for sq in search_queries:
-                            results = tavily.search(sq, max_results=tavily_max)
-                            tid = insert_tavily_search(
-                                conn,
-                                polymarket_id=polymarket_id,
-                                search_query=sq,
-                                results=results,
-                                max_results=tavily_max,
-                                k2_search_query_id=k2_row_id,
-                            )
-                            all_tavily_results.extend(results)
-                            last_tavily_id = tid
-                            tavily_stored += 1
-
-                        # ── Step 4: Gemini thesis from aggregated Tavily results ──
-                        stage = "gemini"
-                        if last_tavily_id is None:
-                            raise RuntimeError("No Tavily searches completed")
-
-                        reasoning_input = format_tavily_results_for_gemini(
-                            all_tavily_results,
-                        )
-                        thesis_text = generate_thesis(reasoning_input, market_dict)
-                        if thesis_text is None:
-                            thesis_text = ""
-
-                        insert_gemini_summary(
-                            conn,
-                            polymarket_id=polymarket_id,
-                            tavily_search_id=last_tavily_id,
-                            thesis_text=thesis_text,
-                            reasoning_input=reasoning_input,
+                            polymarket_id,
+                            tavily_max=tavily_max,
+                            market_row=m,
                         )
                         cur.execute(f"RELEASE SAVEPOINT {sp}")
-                        gemini_stored += 1
-
-                    except Exception as exc:
+                        tavily_stored += 1
+                        agent_stored += 1
+                    except AnalysisPipelineError as exc:
                         cur.execute(f"ROLLBACK TO SAVEPOINT {sp}")
                         logger.warning(
                             "Pipeline research failed for polymarket_id=%s (stage=%s): %s",
                             polymarket_id,
-                            stage,
+                            exc.stage,
+                            exc.cause,
+                        )
+                        pipeline_errors.append(
+                            {
+                                "polymarket_id": polymarket_id,
+                                "stage": exc.stage,
+                                "error": str(exc.cause),
+                            }
+                        )
+                    except Exception as exc:
+                        cur.execute(f"ROLLBACK TO SAVEPOINT {sp}")
+                        logger.warning(
+                            "Pipeline research failed for polymarket_id=%s: %s",
+                            polymarket_id,
                             exc,
                         )
                         pipeline_errors.append(
                             {
                                 "polymarket_id": polymarket_id,
-                                "stage": stage,
+                                "stage": "unknown",
                                 "error": str(exc),
                             }
                         )
@@ -293,7 +235,7 @@ def ingest_pipeline():
             "markets_considered": len(candidates),
             "k2_stored": k2_stored,
             "tavily_stored": tavily_stored,
-            "gemini_stored": gemini_stored,
+            "agent_stored": agent_stored,
             "failed": len(pipeline_errors),
             "errors": pipeline_errors,
             "sample_polymarket_ids": sample_ids,

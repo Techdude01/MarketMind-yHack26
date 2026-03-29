@@ -2,6 +2,27 @@
 
 Uses the MBZUAI-IFM/K2-Think-v2 model via the k2think.ai API,
 which exposes an OpenAI-compatible /chat/completions endpoint.
+
+NOTE: K2's non-streaming endpoint (/chat/completions with stream=False)
+returns HTTP 503 "Server is busy" in the current API version. We work
+around this by always using stream=True and accumulating the delta chunks.
+
+# ── Gemini drop-in replacement ─────────────────────────────────────────────
+# If you need to swap K2 for Gemini, install `google-generativeai` and
+# replace _get_client() / the completions calls with:
+#
+#   import google.generativeai as genai
+#   genai.configure(api_key=Config.GEMINI_API_KEY)
+#   model = genai.GenerativeModel("gemini-2.0-flash")
+#   response = model.generate_content(prompt)
+#   return response.text
+#
+# Or, via the OpenAI-compatible Gemini endpoint:
+#   client = OpenAI(
+#       api_key=Config.GEMINI_API_KEY,
+#       base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+#   )
+# ───────────────────────────────────────────────────────────────────────────
 """
 
 import json
@@ -31,6 +52,16 @@ def _get_client() -> OpenAI:
     return _client
 
 
+def _collect_stream(stream) -> str:
+    """Consume a streaming chat-completions response and return the full text."""
+    content = ""
+    for chunk in stream:
+        delta = chunk.choices[0].delta.content
+        if delta:
+            content += delta
+    return content
+
+
 def reason(market: dict) -> str:
     """Deep-reason about a market event and return structured analysis.
 
@@ -56,13 +87,15 @@ def reason(market: dict) -> str:
         "Provide detailed, step-by-step reasoning."
     )
 
-    response = client.chat.completions.create(
+    # K2 non-streaming endpoint returns 503; use stream=True as workaround.
+    # To switch to Gemini: see module-level docstring.
+    stream = client.chat.completions.create(
         model=MODEL,
         messages=[{"role": "user", "content": prompt}],
         max_tokens=1024,
-        stream=False,
+        stream=True,  # required — K2's non-streaming endpoint is unreliable
     )
-    return response.choices[0].message.content
+    return _collect_stream(stream)
 
 
 _SEARCH_QUERY_PROMPT = """\
@@ -188,10 +221,12 @@ def chat(message: str, system_prompt: str | None = None) -> str:
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": message})
 
-    response = client.chat.completions.create(
+    # K2 non-streaming endpoint returns 503; use stream=True as workaround.
+    # To switch to Gemini: see module-level docstring.
+    stream = client.chat.completions.create(
         model=MODEL,
         messages=messages,
         max_tokens=1024,
-        stream=False,
+        stream=True,  # required — K2's non-streaming endpoint is unreliable
     )
-    return response.choices[0].message.content
+    return _collect_stream(stream)
