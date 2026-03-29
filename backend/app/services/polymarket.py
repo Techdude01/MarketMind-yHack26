@@ -107,6 +107,36 @@ def get_market(condition_id: str) -> dict[str, Any]:
     return data
 
 
+def get_prices_history(
+    market_token_id: str,
+    *,
+    start_ts: int,
+    end_ts: int,
+    interval: str = "1h",
+) -> dict[str, Any]:
+    """Fetch CLOB price history for an outcome token (YES/NO asset id).
+
+    Polymarket caps ``startTs``–``endTs`` to a short window (~7 days); callers
+    that need longer ranges should issue multiple requests.
+
+    Args:
+        market_token_id: CLOB token id (first ``clob_token_ids`` entry for YES).
+        start_ts: Unix seconds (inclusive).
+        end_ts: Unix seconds (inclusive).
+        interval: Aggregation bucket per OpenAPI (``1h``, ``1d``, etc.).
+
+    Returns:
+        Parsed JSON, typically ``{"history": [{"t": int, "p": float}, ...]}``.
+    """
+    params: dict[str, Any] = {
+        "market": market_token_id,
+        "startTs": start_ts,
+        "endTs": end_ts,
+        "interval": interval,
+    }
+    return _get("/prices-history", params=params)
+
+
 def get_order_book(token_id: str) -> dict[str, Any]:
     """Fetch the order-book snapshot for a token.
 

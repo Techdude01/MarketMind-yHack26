@@ -23,11 +23,67 @@ except ImportError:
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
-from openai import InternalServerError
+from openai import (
+    APIConnectionError,
+    APIError,
+    InternalServerError,
+    RateLimitError,
+)
 
 from app.config import Config
 
 logger = logging.getLogger(__name__)
+
+
+def _is_retryable_k2_upstream_error(exc: BaseException) -> bool:
+    """True for transient K2 / OpenAI-compatible gateway failures worth retrying."""
+    if isinstance(exc, (InternalServerError, APIConnectionError, RateLimitError)):
+        return True
+    if isinstance(exc, APIError):
+        code = getattr(exc, "status_code", None)
+        if code is not None and code < 500:
+            return False
+        msg = str(exc).lower()
+        if any(
+            x in msg
+            for x in (
+                "server error",
+                "try again",
+                "overloaded",
+                "timeout",
+                "temporarily unavailable",
+                "bad gateway",
+                "gateway timeout",
+            )
+        ):
+            return True
+        return code is None or code >= 500
+    return False
+
+
+def _invoke_agent_with_retries(
+    agent,
+    payload: dict,
+    *,
+    max_retries: int,
+    verbose: bool,
+) -> dict:
+    """Run ``agent.invoke`` with exponential backoff on transient upstream errors."""
+    for attempt in range(1, max_retries + 1):
+        try:
+            return agent.invoke(payload)
+        except Exception as exc:
+            if _is_retryable_k2_upstream_error(exc) and attempt < max_retries:
+                wait = min(2**attempt, 60)
+                msg = (
+                    f"K2 upstream error (attempt {attempt}/{max_retries}): {exc!s}. "
+                    f"Retrying in {wait}s..."
+                )
+                print(msg) if verbose else logger.warning(msg)
+                time.sleep(wait)
+            else:
+                raise
+    raise RuntimeError("agent.invoke retries exhausted")  # pragma: no cover
 
 # ---------------------------------------------------------------------------
 # Domains excluded from Tavily searches during market analysis.
@@ -204,7 +260,7 @@ def create_k2_agent(
 def run_k2_agent(
     query: str,
     verbose: bool = False,
-    max_retries: int = 3,
+    max_retries: int = 5,
     system_prompt: Optional[str] = None,
     exclude_domains: Optional[List[str]] = None,
     *,
@@ -249,23 +305,12 @@ def run_k2_agent(
         input_messages.append(SystemMessage(content=system_prompt))
     input_messages.append(HumanMessage(content=query))
 
-    # Invoke with retry logic for transient 5xx errors
-    for attempt in range(1, max_retries + 1):
-        try:
-            result = agent.invoke({"messages": input_messages})
-            break
-        except InternalServerError as exc:
-            wait = 2 ** attempt
-            if attempt < max_retries:
-                msg = f"⚠️  K2 server busy (attempt {attempt}/{max_retries}). Retrying in {wait}s..."
-                print(msg) if verbose else logger.warning(msg)
-                time.sleep(wait)
-            else:
-                raise RuntimeError(
-                    f"K2 API returned 'Server is busy' after {max_retries} attempts. "
-                    "The K2 inference endpoint may be overloaded — try again in a minute."
-                ) from exc
-    
+    result = _invoke_agent_with_retries(
+        agent,
+        {"messages": input_messages},
+        max_retries=max_retries,
+        verbose=verbose,
+    )
     messages = result["messages"]
     raw_final = messages[-1].content
 
@@ -306,17 +351,12 @@ def run_k2_agent(
         # Append tool message & run agent again
         messages.append(ToolMessage(content=json.dumps(tool_res), tool_call_id=fake_id))
         
-        for attempt in range(1, max_retries + 1):
-            try:
-                result = agent.invoke({"messages": messages})
-                break
-            except InternalServerError as exc:
-                wait = 2 ** attempt
-                if attempt < max_retries:
-                    time.sleep(wait)
-                else:
-                    raise RuntimeError("K2 API Server busy") from exc
-        
+        result = _invoke_agent_with_retries(
+            agent,
+            {"messages": messages},
+            max_retries=max_retries,
+            verbose=verbose,
+        )
         messages = result["messages"]
         raw_final = messages[-1].content
 

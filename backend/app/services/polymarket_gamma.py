@@ -98,6 +98,27 @@ def _parse_decimal(v: Any) -> Decimal | None:
     return None
 
 
+def fetch_yes_clob_token_id_for_polymarket(polymarket_id: int) -> str | None:
+    """Return YES outcome token id from Gamma when Postgres has no ``clob_token_ids``."""
+    url = f"{GAMMA_MARKETS_URL}/{polymarket_id}"
+    try:
+        resp = requests.get(url, timeout=12)
+        resp.raise_for_status()
+        raw = resp.json()
+        if not isinstance(raw, dict):
+            return None
+        arr = _parse_json_array(raw.get("clobTokenIds"))
+        if arr and arr[0] is not None:
+            return str(arr[0])
+    except Exception as exc:
+        logger.debug(
+            "Gamma clobTokenIds lookup failed for polymarket_id=%s: %s",
+            polymarket_id,
+            exc,
+        )
+    return None
+
+
 def _parse_json_array(v: Any) -> list[Any] | None:
     if v is None:
         return None
