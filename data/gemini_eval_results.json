@@ -22,9 +22,9 @@
       "category": "general",
       "summary_source": "reasoning_input",
       "summary_preview": "### 1. AI Models Competing in Prediction Markets - Forecaster Arena URL: https://www.forecasterarena.com/markets/1765056787079-j5pq77xd8 This market will resolve to \u201cYes\u201d if the Ch",
-      "sentiment_score": 0.0428,
+      "sentiment_score": 0.0089,
       "market_crowd_score": -0.998,
-      "divergence": 1.0408,
+      "divergence": 1.0069,
       "action": "ACT"
     },
     {
@@ -33,9 +33,9 @@
       "category": "general",
       "summary_source": "reasoning_input",
       "summary_preview": "### 1. Will the Charlotte Hornets win the 2026 NBA Finals? \u2014 0.9% Odds ... URL: http://www.almanac.ai/m/will-the-charlotte-hornets-win-the-2026-nba-finals # Will the Charlotte Horn",
-      "sentiment_score": -0.1893,
+      "sentiment_score": -0.0143,
       "market_crowd_score": -0.978,
-      "divergence": 0.7887,
+      "divergence": 0.9637,
       "action": "ACT"
     },
     {
@@ -44,9 +44,9 @@
       "category": "general",
       "summary_source": "reasoning_input",
       "summary_preview": "### 1. Uzbekistan to win World Cup 2026 odds URL: https://www.squawka.com/en/outright-markets/uzbekistan-world-cup-2026-odds/ # Uzbekistan to win World Cup 2026 odds: Probability, ",
-      "sentiment_score": 0.0723,
+      "sentiment_score": 0.304,
       "market_crowd_score": -0.996,
-      "divergence": 1.0683,
+      "divergence": 1.3,
       "action": "ACT"
     },
     {
@@ -55,9 +55,9 @@
       "category": "general",
       "summary_source": "reasoning_input",
       "summary_preview": "### 1. CNN panel identifies 2028 frontrunners for Democrats URL: https://www.independent.co.uk/news/world/americas/us-politics/2028-election-democrats-nominee-raphael-warnock-b2890",
-      "sentiment_score": 0.097,
+      "sentiment_score": 0.0832,
       "market_crowd_score": -0.99,
-      "divergence": 1.087,
+      "divergence": 1.0732,
       "action": "ACT"
     },
     {
@@ -66,9 +66,9 @@
       "category": "general",
       "summary_source": "reasoning_input",
       "summary_preview": "### 1. Democratic Presidential Nominee 2028 - CryptoRank.io URL: https://cryptorank.io/prediction-markets/democratic-presidential-nominee-2028 Will Jon Ossoff win the 2028 Democrat",
-      "sentiment_score": -0.0098,
+      "sentiment_score": 0.0752,
       "market_crowd_score": -0.986,
-      "divergence": 0.9762,
+      "divergence": 1.0612,
       "action": "ACT"
     }
   ]

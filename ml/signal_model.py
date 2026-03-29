@@ -14,6 +14,7 @@ FINANCIAL_KEYWORDS = {
     "earnings",
 }
 THRESHOLD = 0.3
+MAX_MODEL_TOKENS = 512
 
 
 finbert = pipeline(
@@ -28,13 +29,27 @@ cardiff = pipeline(
 )
 
 
+def preprocess_text(text: str) -> str:
+    """Normalize handles/links in text, following Cardiff model recommendations."""
+    normalized: list[str] = []
+    for token in (text or "").split(" "):
+        token = "@user" if token.startswith("@") and len(token) > 1 else token
+        token = "http" if token.startswith("http") else token
+        normalized.append(token)
+    return " ".join(normalized).strip()
+
+
 def get_sentiment_score(summary: str, category: str) -> float:
     """Route by category and return scalar sentiment score in [-1, 1]."""
+    text = preprocess_text(summary or "")
+    if not text:
+        return 0.0
+
     category_lower = (category or "").lower()
     if any(keyword in category_lower for keyword in FINANCIAL_KEYWORDS):
-        result = finbert((summary or "")[:512])
+        result = finbert(text, truncation=True, max_length=MAX_MODEL_TOKENS)
     else:
-        result = cardiff((summary or "")[:512])
+        result = cardiff(text, truncation=True, max_length=MAX_MODEL_TOKENS)
 
     # HF pipelines may return either [[{...}, ...]] or [{...}, ...] depending on version.
     if isinstance(result, list) and result and isinstance(result[0], list):
