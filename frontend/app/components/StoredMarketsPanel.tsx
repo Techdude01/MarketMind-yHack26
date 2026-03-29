@@ -54,9 +54,13 @@ export type DbMarket = {
   updated_at_api: string | null;
   last_ingested_at: string | null;
   demo_score: number | null;
+  divergence_score: number | null;
+  new_sentiment: number | null;
+  market_sentiment: number | null;
+  market_prob: number | null;
 };
 
-type SortKey = "demo_score" | "volume" | "price";
+type SortKey = "divergence" | "volume" | "price";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -73,23 +77,47 @@ function pct(n: number | null | undefined): string {
   return `${Math.round(n * 100)}%`;
 }
 
-function divergenceColor(score: number | null): string {
-  if (score == null) return MM.ghost;
-  if (score >= 19) return MM.green;
-  if (score >= 17) return MM.amber;
+/** Convert new_sentiment (-1..+1) to a probability (0..1). */
+function aiProb(newSentiment: number | null): number | null {
+  if (newSentiment == null) return null;
+  return (newSentiment + 1) / 2;
+}
+
+/** Signed probability shift: positive = AI thinks Yes is underpriced. */
+function probShift(m: DbMarket): number | null {
+  const ai = aiProb(m.new_sentiment);
+  const mp = m.market_prob ?? m.last_trade_price;
+  if (ai == null || mp == null) return null;
+  return ai - mp;
+}
+
+function shiftColor(shift: number | null): string {
+  if (shift == null) return MM.ghost;
+  const abs = Math.abs(shift);
+  if (abs >= 0.15) return shift > 0 ? MM.green : MM.red;
+  if (abs >= 0.05) return MM.amber;
   return MM.dim;
 }
 
-function divergenceLabel(score: number | null): string {
-  if (score == null) return "—";
-  return score.toFixed(1);
+function shiftLabel(shift: number | null): string {
+  if (shift == null) return "—";
+  const sign = shift >= 0 ? "+" : "";
+  return `${sign}${Math.round(shift * 100)}%`;
+}
+
+function shiftTag(shift: number | null): string {
+  if (shift == null) return "";
+  if (Math.abs(shift) < 0.05) return "aligned";
+  return shift > 0 ? "underpriced" : "overpriced";
 }
 
 function sortMarkets(markets: DbMarket[], key: SortKey): DbMarket[] {
   const copy = [...markets];
   switch (key) {
-    case "demo_score":
-      return copy.sort((a, b) => (b.demo_score ?? 0) - (a.demo_score ?? 0));
+    case "divergence":
+      return copy.sort(
+        (a, b) => Math.abs(probShift(b) ?? 0) - Math.abs(probShift(a) ?? 0)
+      );
     case "volume":
       return copy.sort(
         (a, b) => (b.volume_num ?? b.volume ?? 0) - (a.volume_num ?? a.volume ?? 0)
@@ -112,7 +140,7 @@ export function StoredMarketsPanel() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
-  const [sortKey, setSortKey] = useState<SortKey>("demo_score");
+  const [sortKey, setSortKey] = useState<SortKey>("divergence");
 
   const loadMarkets = useCallback(async () => {
     setLoading(true);
@@ -207,7 +235,7 @@ export function StoredMarketsPanel() {
           <span style={{ fontSize: 12, color: MM.dim }}>Sort:</span>
           {(
             [
-              ["demo_score", "Signal"],
+              ["divergence", "Divergence"],
               ["volume", "Volume"],
               ["price", "Odds"],
             ] as [SortKey, string][]
@@ -354,6 +382,9 @@ function FeaturedCard({ m }: { m: DbMarket }) {
   const yesP = m.last_trade_price ?? 0;
   const noP = 1 - yesP;
   const vol = compactVol(m.volume_num ?? m.volume ?? null);
+  const shift = probShift(m);
+  const ai = aiProb(m.new_sentiment);
+  const mp = m.market_prob ?? m.last_trade_price;
 
   return (
     <div
@@ -388,20 +419,23 @@ function FeaturedCard({ m }: { m: DbMarket }) {
           position: "absolute", inset: 0,
           background: "linear-gradient(0deg, rgba(12,12,14,0.95) 0%, rgba(12,12,14,0.2) 50%, transparent 100%)",
         }} />
-        {/* Signal badge */}
+        {/* Divergence badge */}
         <div style={{
           position: "absolute", top: 10, right: 10,
-          display: "flex", alignItems: "center", gap: 5,
-          background: "rgba(0,0,0,0.6)", backdropFilter: "blur(6px)",
-          padding: "4px 10px", borderRadius: 6,
+          display: "flex", alignItems: "center", gap: 6,
+          background: "rgba(0,0,0,0.65)", backdropFilter: "blur(6px)",
+          padding: "5px 10px", borderRadius: 6,
           fontSize: 11, fontWeight: 600, fontFamily: MM.font,
-          color: divergenceColor(m.demo_score),
+          color: shiftColor(shift),
         }}>
           <span style={{
             width: 6, height: 6, borderRadius: "50%",
-            background: divergenceColor(m.demo_score),
+            background: shiftColor(shift),
           }} />
-          {divergenceLabel(m.demo_score)}
+          {shiftLabel(shift)}
+          {shift != null && Math.abs(shift) >= 0.05 && (
+            <span style={{ fontSize: 9, opacity: 0.8 }}>{shiftTag(shift)}</span>
+          )}
         </div>
         {/* Volume badge */}
         <div style={{
@@ -445,13 +479,16 @@ function FeaturedCard({ m }: { m: DbMarket }) {
             No {pct(noP)}
           </span>
         </div>
-        {m.featured && (
-          <span style={{
-            fontSize: 10, color: MM.amber, border: `1px solid rgba(251,191,36,0.3)`,
-            padding: "2px 8px", borderRadius: 4, letterSpacing: "0.05em",
+        {/* AI vs Market probabilities */}
+        {ai != null && mp != null && (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 6,
+            fontSize: 10, fontFamily: MM.font, color: MM.textSub,
           }}>
-            FEATURED
-          </span>
+            <span>AI {pct(ai)}</span>
+            <span style={{ color: shiftColor(shift), fontSize: 12 }}>→</span>
+            <span>Mkt {pct(mp)}</span>
+          </div>
         )}
       </div>
     </div>
@@ -467,6 +504,7 @@ function MarketCard({ m }: { m: DbMarket }) {
   const yesP = m.last_trade_price ?? 0;
   const noP = 1 - yesP;
   const vol = compactVol(m.volume_num ?? m.volume ?? null);
+  const shift = probShift(m);
 
   return (
     <div
@@ -499,20 +537,20 @@ function MarketCard({ m }: { m: DbMarket }) {
             style={{ width: "100%", height: "100%", objectFit: "cover", opacity: hovered ? 1 : 0.85, transition: "opacity 0.2s" }}
           />
         ) : null}
-        {/* Signal dot */}
+        {/* Divergence badge */}
         <div style={{
           position: "absolute", top: 8, right: 8,
           display: "flex", alignItems: "center", gap: 4,
           background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)",
           padding: "3px 8px", borderRadius: 5,
           fontSize: 10, fontWeight: 600, fontFamily: MM.font,
-          color: divergenceColor(m.demo_score),
+          color: shiftColor(shift),
         }}>
           <span style={{
             width: 5, height: 5, borderRadius: "50%",
-            background: divergenceColor(m.demo_score),
+            background: shiftColor(shift),
           }} />
-          {divergenceLabel(m.demo_score)}
+          {shiftLabel(shift)}
         </div>
       </div>
 
@@ -555,8 +593,10 @@ function MarketCard({ m }: { m: DbMarket }) {
           fontSize: 11, color: MM.dim,
         }}>
           <span>{vol} Vol</span>
-          {m.featured && (
-            <span style={{ color: MM.amber, fontSize: 10 }}>FEATURED</span>
+          {shift != null && Math.abs(shift) >= 0.05 && (
+            <span style={{ color: shiftColor(shift), fontSize: 10, fontWeight: 600 }}>
+              {shiftTag(shift)}
+            </span>
           )}
         </div>
       </div>

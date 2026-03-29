@@ -299,6 +299,46 @@ function freshnessTone(ageHours: number | null): {
   };
 }
 
+// ── Divergence helpers (same logic as homepage) ──────────────────────────────
+function aiProbFromSentiment(newSentiment: number | null | undefined): number | null {
+  if (newSentiment == null) return null;
+  return (newSentiment + 1) / 2;
+}
+
+function probShiftFromSentiment(
+  newSentiment: number | null | undefined,
+  marketProb: number | null | undefined,
+): number | null {
+  const ai = aiProbFromSentiment(newSentiment);
+  if (ai == null || marketProb == null) return null;
+  return ai - marketProb;
+}
+
+function shiftColor(shift: number | null): string {
+  if (shift == null) return MM.ghost;
+  const abs = Math.abs(shift);
+  if (abs >= 0.15) return shift > 0 ? MM.green : MM.red;
+  if (abs >= 0.05) return MM.yellow;
+  return MM.dim;
+}
+
+function shiftLabel(shift: number | null): string {
+  if (shift == null) return "—";
+  const sign = shift >= 0 ? "+" : "";
+  return `${sign}${Math.round(shift * 100)}%`;
+}
+
+function shiftTag(shift: number | null): string {
+  if (shift == null) return "";
+  if (Math.abs(shift) < 0.05) return "aligned";
+  return shift > 0 ? "underpriced" : "overpriced";
+}
+
+function pctFmt(n: number | null | undefined): string {
+  if (n == null || Number.isNaN(n)) return "—";
+  return `${Math.round(n * 100)}%`;
+}
+
 // ── Sub-components ────────────────────────────────────────────────────────────
 function SectionHeader({ label }: { label: string }) {
   return (
@@ -936,10 +976,10 @@ export default function MarketDetailPage() {
               <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 2 }}>
                 <StatCell label="CURRENT_ODDS" value={signal.impliedProb != null ? signal.impliedProb.toFixed(2) : "—"} />
                 <StatCell
-                  label="AGENT_PROB"
+                  label="AI_PROB"
                   value={
-                    thesis?.agent_probability != null
-                      ? (thesis.agent_probability / 100).toFixed(2)
+                    sentimentAnalysis
+                      ? pctFmt(aiProbFromSentiment(sentimentAnalysis.new_sentiment))
                       : "—"
                   }
                 />
@@ -997,30 +1037,75 @@ export default function MarketDetailPage() {
                   [SENTIMENT_ANALYSIS]
                 </div>
                 <div style={{ padding: "14px 12px", fontFamily: MM.font, fontSize: 12, color: MM.textSub }}>
-                  {sentimentAnalysis ? (
-                    <>
-                      <div style={{ marginBottom: 10, fontSize: 10, color: MM.dim, letterSpacing: "0.06em" }}>
-                        Sentiment Analysis
-                      </div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                        <StatCell
-                          label="divergence_score"
-                          value={sentimentAnalysis.divergence_score.toFixed(4)}
-                        />
-                        <StatCell
-                          label="new_sentiment"
-                          value={sentimentAnalysis.new_sentiment.toFixed(4)}
-                        />
-                        <StatCell
-                          label="market_sentiment"
-                          value={sentimentAnalysis.market_sentiment.toFixed(4)}
-                        />
-                      </div>
-                      <div style={{ marginTop: 14, fontSize: 10, color: MM.ghost }}>
-                        as_of: {formatDate(sentimentAnalysis.created_at)}
-                      </div>
-                    </>
-                  ) : (
+                  {sentimentAnalysis ? (() => {
+                    const aiP = aiProbFromSentiment(sentimentAnalysis.new_sentiment);
+                    const mktP = market.last_trade_price;
+                    const shift = probShiftFromSentiment(sentimentAnalysis.new_sentiment, mktP);
+                    const sColor = shiftColor(shift);
+                    return (
+                      <>
+                        {/* Divergence headline */}
+                        <div style={{
+                          display: "flex", alignItems: "center", gap: 8,
+                          marginBottom: 14, padding: "10px 12px",
+                          background: `${sColor}11`, border: `1px solid ${sColor}33`,
+                        }}>
+                          <span style={{
+                            width: 8, height: 8, borderRadius: "50%",
+                            background: sColor, flexShrink: 0,
+                          }} />
+                          <span style={{ fontSize: 18, fontWeight: 700, color: sColor }}>
+                            {shiftLabel(shift)}
+                          </span>
+                          {shift != null && Math.abs(shift) >= 0.05 && (
+                            <span style={{ fontSize: 11, color: sColor, opacity: 0.85 }}>
+                              {shiftTag(shift)}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* AI vs Market comparison */}
+                        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                          <div style={{
+                            flex: 1, background: MM.surface2, border: `1px solid ${MM.border}`,
+                            padding: "10px 12px", display: "flex", flexDirection: "column", gap: 4,
+                          }}>
+                            <div style={{ fontSize: 9, color: MM.dim, letterSpacing: "0.08em" }}>AI_PROB</div>
+                            <div style={{ fontSize: 20, fontWeight: 700, color: MM.green }}>
+                              {pctFmt(aiP)}
+                            </div>
+                            <div style={{ fontSize: 9, color: MM.ghost }}>from news sentiment</div>
+                          </div>
+                          <div style={{
+                            display: "flex", alignItems: "center",
+                            fontSize: 16, color: sColor, fontWeight: 700,
+                          }}>→</div>
+                          <div style={{
+                            flex: 1, background: MM.surface2, border: `1px solid ${MM.border}`,
+                            padding: "10px 12px", display: "flex", flexDirection: "column", gap: 4,
+                          }}>
+                            <div style={{ fontSize: 9, color: MM.dim, letterSpacing: "0.08em" }}>MKT_PROB</div>
+                            <div style={{ fontSize: 20, fontWeight: 700, color: MM.text }}>
+                              {pctFmt(mktP)}
+                            </div>
+                            <div style={{ fontSize: 9, color: MM.ghost }}>current market price</div>
+                          </div>
+                        </div>
+
+                        {/* Raw data */}
+                        <div style={{
+                          fontSize: 10, color: MM.ghost,
+                          display: "flex", flexDirection: "column", gap: 3,
+                          borderTop: `1px solid ${MM.border}`, paddingTop: 10,
+                        }}>
+                          <div>divergence_score: {sentimentAnalysis.divergence_score.toFixed(4)}</div>
+                          <div>new_sentiment: {sentimentAnalysis.new_sentiment.toFixed(4)}</div>
+                          <div>market_sentiment: {sentimentAnalysis.market_sentiment.toFixed(4)}</div>
+                          <div>as_of: {formatDate(sentimentAnalysis.created_at)}</div>
+                        </div>
+                      </>
+                    );
+                  })() : (
                     <span style={{ color: MM.dim }}>
                       Run analyze to generate sentiment scores.
                     </span>
@@ -1085,6 +1170,26 @@ export default function MarketDetailPage() {
           <CardShell>
             <SectionHeader label="market_signal" />
             <div style={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
+              {(() => {
+                const shift = sentimentAnalysis
+                  ? probShiftFromSentiment(sentimentAnalysis.new_sentiment, market.last_trade_price)
+                  : null;
+                const sColor = shiftColor(shift);
+                return (
+                  <SignalCell
+                    label="divergence"
+                    value={shiftLabel(shift)}
+                    sub={
+                      shift != null && Math.abs(shift) >= 0.05
+                        ? `AI says Yes is ${shiftTag(shift)}`
+                        : shift != null
+                        ? "AI and market aligned"
+                        : "run analysis to compute"
+                    }
+                    accent={sColor}
+                  />
+                );
+              })()}
               <SignalCell
                 label="implied_probability"
                 value={

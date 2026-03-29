@@ -126,9 +126,20 @@ SELECT
     m.outcomes,
     m.outcome_prices,
     m.updated_at_api,
-    m.last_ingested_at
+    m.last_ingested_at,
+    s.divergence_score,
+    s.new_sentiment,
+    s.market_sentiment,
+    s.market_prob
 FROM homepage_markets h
 JOIN polymarket_markets m USING (polymarket_id)
+LEFT JOIN LATERAL (
+    SELECT divergence_score, new_sentiment, market_sentiment, market_prob
+    FROM market_sentiment_signals
+    WHERE polymarket_id = h.polymarket_id
+    ORDER BY created_at DESC
+    LIMIT 1
+) s ON true
 ORDER BY h.demo_score DESC
 LIMIT %(limit)s
 """
