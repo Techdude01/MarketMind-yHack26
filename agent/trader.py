@@ -158,10 +158,48 @@ def submit_trade(
     return resp.json()
 
 
-result = submit_trade(
-    condition_id="0xb48621f7eba07b0a3eeabc6afb09ae42490239903997b9d412b0f69aeb040c8b",
-    token_id=75467129615908319583031474642658885479135630431889036121812713428992454630178,
-    amount=1.0,
-    price=0.043,
-    post_order=False,
-)
+def submit_trade_at_current_token_price(
+    condition_id: str,
+    token_id: int,
+    amount: float,
+    post_order: bool = True,
+) -> Dict[str, Any]:
+    market = requests.get(
+        f"{API_BASE_URL}/markets/{condition_id}",
+        headers=_headers(),
+        timeout=REQUEST_TIMEOUT,
+    ).json()
+
+    token_price = None
+    for t in market.get("tokens", []):
+        try:
+            if int(t.get("token_id")) == int(token_id):
+                token_price = t.get("price")
+                break
+        except Exception:
+            pass
+
+    if token_price is None:
+        raise ValueError("No token price found for selected token_id")
+
+    return submit_trade(
+        condition_id=condition_id,
+        token_id=token_id,
+        amount=amount,
+        price=float(token_price),
+        post_order=post_order,
+    )
+
+
+# Mock test run
+# if __name__ == "__main__":
+#     condition_id = "0xb48621f7eba07b0a3eeabc6afb09ae42490239903997b9d412b0f69aeb040c8b"
+#     token_id = 75467129615908319583031474642658885479135630431889036121812713428992454630178
+
+#     result = submit_trade_at_current_token_price(
+#         condition_id=condition_id,
+#         token_id=token_id,
+#         amount=1.0,
+#         post_order=False,
+#     )
+#     print(result)
