@@ -47,6 +47,7 @@ def create_app():
 
     # ── Blueprints ──────────────────────────────────────────────────────────
     from app.routes.agent import agent_bp
+    from app.routes.analyze import analyze_bp
     from app.routes.clob import clob_bp
     from app.routes.ingest import ingest_bp
     from app.routes.k2 import k2_bp
@@ -56,6 +57,7 @@ def create_app():
     from app.routes.trade import trade_bp
 
     app.register_blueprint(markets_bp)
+    app.register_blueprint(analyze_bp)
     app.register_blueprint(ingest_bp)
     app.register_blueprint(clob_bp)
     app.register_blueprint(agent_bp)

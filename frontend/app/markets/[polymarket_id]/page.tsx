@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   Bar,
   BarChart,
@@ -34,6 +35,18 @@ const MM = {
 const BASE_URL = (
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:5001"
 ).replace(/\/$/, "");
+
+/** Matches backend ``k2_agent._THINK_CLOSE`` — show markdown after K2's closing think tag. */
+const THINK_CLOSE_TAG = "\u003c/think\u003e";
+
+function thesisMarkdownForDisplay(text: string): string {
+  if (text.includes(THINK_CLOSE_TAG)) {
+    const parts = text.split(THINK_CLOSE_TAG);
+    const tail = parts[parts.length - 1];
+    return tail !== undefined ? tail.trim() : text;
+  }
+  return text;
+}
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface MarketDetail {
@@ -343,7 +356,7 @@ export default function MarketDetailPage() {
     setAnalyzeError("");
     try {
       const res = await fetch(
-        `${BASE_URL}/ingest/research/${polymarket_id}`,
+        `${BASE_URL}/analyze/${polymarket_id}`,
         { method: "POST" },
       );
       const data = (await res.json().catch(() => ({}))) as {
@@ -668,7 +681,7 @@ export default function MarketDetailPage() {
         >
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <span style={{ fontSize: 11, color: MM.textSub }}>
-              Run Tavily search + Gemini thesis for this market
+              Run Tavily search + K2 thesis for this market
             </span>
             {analyzeError && (
               <span style={{ fontSize: 10, color: MM.red }}>{analyzeError}</span>
@@ -752,7 +765,9 @@ export default function MarketDetailPage() {
                 )}
               </div>
               <div className="thesis-body">
-                <ReactMarkdown>{thesis.thesis_text}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {thesisMarkdownForDisplay(thesis.thesis_text)}
+                </ReactMarkdown>
               </div>
               <style>{`
                 .thesis-body { font-family: ${MM.font}; font-size: 12px; line-height: 1.9; color: ${MM.textSub}; }
@@ -769,6 +784,9 @@ export default function MarketDetailPage() {
                 .thesis-body blockquote { border-left: 2px solid ${MM.ghost}; margin: 0 0 10px; padding: 4px 12px; color: ${MM.dim}; }
                 .thesis-body a { color: ${MM.green}; text-decoration: none; }
                 .thesis-body a:hover { text-decoration: underline; }
+                .thesis-body table { width: 100%; border-collapse: collapse; margin: 0 0 12px; font-size: 11px; }
+                .thesis-body th, .thesis-body td { border: 1px solid ${MM.border}; padding: 8px 10px; text-align: left; vertical-align: top; }
+                .thesis-body th { color: ${MM.text}; font-weight: 600; background: ${MM.surface2}; }
               `}</style>
             </div>
           ) : (
@@ -789,9 +807,9 @@ export default function MarketDetailPage() {
                   padding: "1px 5px",
                 }}
               >
-                POST /ingest/pipeline
+                {`POST /analyze/${polymarket_id}`}
               </code>{" "}
-              to generate analysis.
+              or use &gt; analyze_market.
             </div>
           )}
         </section>
@@ -817,9 +835,9 @@ export default function MarketDetailPage() {
                   padding: "1px 5px",
                 }}
               >
-                POST /ingest/pipeline
+                {`POST /analyze/${polymarket_id}`}
               </code>{" "}
-              to fetch Tavily results.
+              or use &gt; analyze_market.
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
