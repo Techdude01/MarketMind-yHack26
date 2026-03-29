@@ -49,6 +49,7 @@ def create_app():
     from app.routes.agent import agent_bp
     from app.routes.analyze import analyze_bp
     from app.routes.clob import clob_bp
+    from app.routes.homepage import homepage_bp
     from app.routes.ingest import ingest_bp
     from app.routes.k2 import k2_bp
     from app.routes.markets import markets_bp
@@ -65,6 +66,7 @@ def create_app():
     app.register_blueprint(trade_bp)
     app.register_blueprint(payoff_bp)
     app.register_blueprint(k2_bp)
+    app.register_blueprint(homepage_bp)
 
     # ── Core routes ─────────────────────────────────────────────────────────
     @app.route("/")
