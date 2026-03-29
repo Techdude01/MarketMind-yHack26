@@ -8,7 +8,7 @@ from typing import Any
 
 from app.repositories.polymarket_markets import _serialize_market_row
 
-_HOMEPAGE_LIMIT = 50
+_HOMEPAGE_LIMIT = 30
 
 
 # ── Filtering & scoring helpers ──────────────────────────────────────────────
@@ -25,10 +25,28 @@ def _to_float(v: Any) -> float | None:
         return None
 
 
+def is_homepage_worthy(m: dict[str, Any]) -> bool:
+    """Reject markets that are boring or untradeable."""
+    bid = _to_float(m.get("bestBid", m.get("best_bid")))
+    ask = _to_float(m.get("bestAsk", m.get("best_ask")))
+    if bid is None or ask is None:
+        return False
+
+    ltp = _to_float(m.get("lastTradePrice", m.get("last_trade_price")))
+    if ltp is None or not (0.04 <= ltp <= 0.96):
+        return False
+
+    return True
+
+
 def score_homepage_market(m: dict[str, Any]) -> float:
-    """Ranking score. Higher is better."""
+    """Tradability-weighted ranking score. Higher is better."""
     vol = _to_float(m.get("volumeNum", m.get("volume_num"))) or 0
     score = math.log(vol + 1)
+
+    ltp = _to_float(m.get("lastTradePrice", m.get("last_trade_price")))
+    if ltp is not None:
+        score += 3.0 * (1.0 - abs(ltp - 0.5) / 0.5)
 
     if m.get("featured"):
         score += 2.0
@@ -37,7 +55,15 @@ def score_homepage_market(m: dict[str, Any]) -> float:
     vol_1wk = _to_float(m.get("volume1wk", m.get("volume_1wk")))
     recent = vol_24h or vol_1wk or 0
     if recent > 500_000:
+        score += 1.5
+
+    liq = _to_float(m.get("liquidity")) or 0
+    if liq > 500_000:
         score += 1.0
+
+    spread = _to_float(m.get("spread")) or 0
+    if spread > 0.10:
+        score -= 1.0
 
     return round(score, 4)
 
@@ -45,12 +71,12 @@ def score_homepage_market(m: dict[str, Any]) -> float:
 def select_homepage_markets(
     raw_markets: list[dict[str, Any]], *, limit: int = _HOMEPAGE_LIMIT
 ) -> list[dict[str, Any]]:
-    """Score + rank all fetched Gamma markets for homepage selection.
+    """Filter, score, and rank raw Gamma dicts for homepage selection.
 
     Returns list of ``{"polymarket_id": int, "demo_score": float}`` sorted descending.
-    All fetched markets are included (Gamma API pre-filters already applied).
     """
-    scored = [(m, score_homepage_market(m)) for m in raw_markets]
+    worthy = [m for m in raw_markets if is_homepage_worthy(m)]
+    scored = [(m, score_homepage_market(m)) for m in worthy]
     scored.sort(key=lambda t: t[1], reverse=True)
     top = scored[:limit]
     return [

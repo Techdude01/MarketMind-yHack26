@@ -29,8 +29,8 @@ def _end_date_min_at_least_days_ahead(days: int) -> str:
 
 def fetch_filtered_markets(
     *,
-    limit: int = 36,
-    volume_num_min: int = 10_000_000,
+    limit: int = 200,
+    volume_num_min: int = 1_000_000,
     min_days_until_end: int = 2,
     end_date_min: str | None = None,
     end_date_max: str | None = None,

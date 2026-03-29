@@ -1,24 +1,37 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:5001";
 
-// ── Design tokens ───────────────────────────────────────────
+// ── Design tokens ───────────────────────────────────────────────────────────
 const MM = {
-  bg:          "#0C0C0E",
-  surface:     "#16161A",
-  border:      "rgba(255,255,255,0.18)",
-  borderBright:"rgba(255,255,255,0.32)",
-  text:        "#E4E4E7",
-  dim:         "#71717A",
-  ghost:       "#3F3F46",
-  green:       "#4ADE80",
-  red:         "#F87171",
-  font:        "'JetBrains Mono', monospace",
+  bg: "#0C0C0E",
+  surface: "#16161A",
+  surface2: "#1C1C22",
+  border: "rgba(255,255,255,0.10)",
+  borderHover: "rgba(255,255,255,0.22)",
+  text: "#E4E4E7",
+  textSub: "#A1A1AA",
+  dim: "#71717A",
+  ghost: "#3F3F46",
+  green: "#4ADE80",
+  greenDim: "rgba(74,222,128,0.15)",
+  red: "#F87171",
+  redDim: "rgba(248,113,113,0.15)",
+  amber: "#FBBF24",
+  font: "'JetBrains Mono', monospace",
 };
+
+// ── Types ───────────────────────────────────────────────────────────────────
 
 export type DbMarket = {
   polymarket_id: number;
@@ -40,41 +53,66 @@ export type DbMarket = {
   outcome_prices: unknown;
   updated_at_api: string | null;
   last_ingested_at: string | null;
+  demo_score: number | null;
 };
 
-function formatUsd(n: number | null | undefined): string {
+type SortKey = "demo_score" | "volume" | "price";
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+function compactVol(n: number | null | undefined): string {
   if (n == null || Number.isNaN(n)) return "—";
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(n);
+  if (n >= 1_000_000_000) return `$${(n / 1_000_000_000).toFixed(1)}B`;
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `$${(n / 1_000).toFixed(0)}K`;
+  return `$${n.toFixed(0)}`;
 }
 
-function formatPrice(n: number | null | undefined): string {
+function pct(n: number | null | undefined): string {
   if (n == null || Number.isNaN(n)) return "—";
-  return n.toFixed(3);
+  return `${Math.round(n * 100)}%`;
 }
 
-function formatEndDate(iso: string | null): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
-  return d.toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+function divergenceColor(score: number | null): string {
+  if (score == null) return MM.ghost;
+  if (score >= 19) return MM.green;
+  if (score >= 17) return MM.amber;
+  return MM.dim;
 }
 
-type Props = {
-  title?: string;
-};
+function divergenceLabel(score: number | null): string {
+  if (score == null) return "—";
+  return score.toFixed(1);
+}
 
-export function StoredMarketsPanel({ title = "Markets" }: Props) {
+function sortMarkets(markets: DbMarket[], key: SortKey): DbMarket[] {
+  const copy = [...markets];
+  switch (key) {
+    case "demo_score":
+      return copy.sort((a, b) => (b.demo_score ?? 0) - (a.demo_score ?? 0));
+    case "volume":
+      return copy.sort(
+        (a, b) => (b.volume_num ?? b.volume ?? 0) - (a.volume_num ?? a.volume ?? 0)
+      );
+    case "price":
+      return copy.sort(
+        (a, b) =>
+          Math.abs((b.last_trade_price ?? 0) - 0.5) -
+          Math.abs((a.last_trade_price ?? 0) - 0.5)
+      );
+    default:
+      return copy;
+  }
+}
+
+// ── Main Panel ──────────────────────────────────────────────────────────────
+
+export function StoredMarketsPanel() {
   const [markets, setMarkets] = useState<DbMarket[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string>("");
+  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [sortKey, setSortKey] = useState<SortKey>("demo_score");
 
   const loadMarkets = useCallback(async () => {
     setLoading(true);
@@ -114,122 +152,413 @@ export function StoredMarketsPanel({ title = "Markets" }: Props) {
     void loadMarkets();
   }, [loadMarkets]);
 
+  const filtered = useMemo(() => {
+    let list = markets;
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter((m) => m.question.toLowerCase().includes(q));
+    }
+    return sortMarkets(list, sortKey);
+  }, [markets, search, sortKey]);
+
+  const featured = useMemo(() => filtered.slice(0, 5), [filtered]);
+  const grid = useMemo(() => filtered.slice(5), [filtered]);
+
   return (
-    <div style={{ maxWidth: 1000, margin: "0 auto", padding: "32px 24px", fontFamily: MM.font }}>
+    <div style={{ maxWidth: 1320, margin: "0 auto", padding: "28px 24px 64px", fontFamily: MM.font }}>
       {/* ── Header ── */}
-      <div style={{ marginBottom: 32, display: "flex", flexWrap: "wrap", alignItems: "flex-end", justifyContent: "space-between", gap: 16 }}>
-        <div>
-          <div style={{ fontSize: 11, letterSpacing: "0.12em", color: MM.ghost, marginBottom: 8 }}>// _markets</div>
-          <h1 style={{ fontSize: "clamp(20px, 3vw, 28px)", fontWeight: 700, color: MM.text, margin: 0, letterSpacing: "-0.02em" }}>
-            {title}
-          </h1>
-          <p style={{ marginTop: 6, fontSize: 12, color: MM.dim, maxWidth: 480 }}>
-            Curated homepage markets ranked by volume and activity.
-          </p>
+      <div style={{ marginBottom: 28 }}>
+        <h1 style={{ fontSize: 24, fontWeight: 700, color: MM.text, margin: 0, letterSpacing: "-0.02em" }}>
+          Markets
+        </h1>
+        <p style={{ marginTop: 4, fontSize: 13, color: MM.dim }}>
+          AI-curated prediction markets ranked by tradability
+        </p>
+      </div>
+
+      {/* ── Controls ── */}
+      <div style={{
+        display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12,
+        marginBottom: 28, paddingBottom: 16, borderBottom: `1px solid ${MM.border}`,
+      }}>
+        <div style={{ position: "relative", flex: "1 1 280px", maxWidth: 400 }}>
+          <svg
+            width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={MM.dim}
+            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+            style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }}
+          >
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
+            type="text"
+            placeholder="Search markets..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{
+              width: "100%", padding: "10px 12px 10px 36px",
+              background: MM.surface, border: `1px solid ${MM.border}`,
+              color: MM.text, fontSize: 13, fontFamily: MM.font,
+              borderRadius: 8, outline: "none",
+            }}
+          />
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 12, color: MM.dim }}>Sort:</span>
+          {(
+            [
+              ["demo_score", "Signal"],
+              ["volume", "Volume"],
+              ["price", "Odds"],
+            ] as [SortKey, string][]
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setSortKey(key)}
+              style={{
+                padding: "6px 14px", fontSize: 12, fontFamily: MM.font,
+                border: `1px solid ${sortKey === key ? MM.green : MM.border}`,
+                background: sortKey === key ? "rgba(74,222,128,0.08)" : "transparent",
+                color: sortKey === key ? MM.green : MM.dim,
+                borderRadius: 6, cursor: "pointer",
+                transition: "all 0.15s",
+              }}
+            >
+              {label}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* ── Status messages ── */}
-      {error ? (
-        <div style={{ marginBottom: 16, border: `1px solid ${MM.red}`, background: "rgba(248,113,113,0.06)", padding: "10px 14px", fontSize: 12, color: MM.red }}>
-          error: {error}
+      {/* ── Status ── */}
+      {error && (
+        <div style={{
+          marginBottom: 20, border: `1px solid ${MM.red}`,
+          background: "rgba(248,113,113,0.06)", padding: "10px 14px",
+          fontSize: 12, color: MM.red, borderRadius: 8,
+        }}>
+          {error}
         </div>
-      ) : null}
-      {loading && markets.length === 0 ? (
-        <div style={{ fontSize: 12, color: MM.dim }}>fetching markets...</div>
-      ) : null}
-      {!loading && markets.length === 0 && !error ? (
-        <div style={{ fontSize: 12, color: MM.ghost }}>
-          no markets available yet.
+      )}
+      {loading && markets.length === 0 && (
+        <div style={{ fontSize: 13, color: MM.dim, padding: "40px 0", textAlign: "center" }}>
+          Loading markets...
         </div>
-      ) : null}
+      )}
+      {!loading && markets.length === 0 && !error && (
+        <div style={{ fontSize: 13, color: MM.ghost, padding: "40px 0", textAlign: "center" }}>
+          No markets available yet.
+        </div>
+      )}
 
-      {/* ── Market grid ── */}
-      {markets.length > 0 ? (
-        <ul style={{ display: "grid", gap: 2, gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", listStyle: "none", padding: 0, margin: 0 }}>
-          {markets.map((m) => (
-            <MarketCard key={m.polymarket_id} m={m} />
-          ))}
-        </ul>
-      ) : null}
+      {/* ── Featured Carousel ── */}
+      {featured.length > 0 && (
+        <div style={{ marginBottom: 32 }}>
+          <div style={{ fontSize: 12, color: MM.dim, marginBottom: 12, letterSpacing: "0.06em" }}>
+            TRENDING
+          </div>
+          <FeaturedCarousel markets={featured} />
+        </div>
+      )}
+
+      {/* ── Grid ── */}
+      {grid.length > 0 && (
+        <div>
+          <div style={{ fontSize: 12, color: MM.dim, marginBottom: 12, letterSpacing: "0.06em" }}>
+            ALL MARKETS
+          </div>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(235px, 1fr))",
+            gap: 12,
+          }}>
+            {grid.map((m) => (
+              <MarketCard key={m.polymarket_id} m={m} />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
+// ── Featured Carousel ───────────────────────────────────────────────────────
+
+function FeaturedCarousel({ markets }: { markets: DbMarket[] }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [activeIdx, setActiveIdx] = useState(0);
+  const pauseRef = useRef(false);
+
+  useEffect(() => {
+    const iv = setInterval(() => {
+      if (pauseRef.current || !scrollRef.current) return;
+      const next = (activeIdx + 1) % markets.length;
+      setActiveIdx(next);
+      const el = scrollRef.current;
+      const card = el.children[next] as HTMLElement | undefined;
+      if (card) {
+        el.scrollTo({ left: card.offsetLeft - 12, behavior: "smooth" });
+      }
+    }, 4000);
+    return () => clearInterval(iv);
+  }, [activeIdx, markets.length]);
+
+  const scrollTo = (idx: number) => {
+    setActiveIdx(idx);
+    const el = scrollRef.current;
+    if (!el) return;
+    const card = el.children[idx] as HTMLElement | undefined;
+    if (card) el.scrollTo({ left: card.offsetLeft - 12, behavior: "smooth" });
+  };
+
+  return (
+    <div
+      onMouseEnter={() => { pauseRef.current = true; }}
+      onMouseLeave={() => { pauseRef.current = false; }}
+    >
+      <div
+        ref={scrollRef}
+        style={{
+          display: "flex", gap: 14, overflowX: "auto",
+          scrollSnapType: "x mandatory", scrollbarWidth: "none",
+          paddingBottom: 4,
+        }}
+      >
+        {markets.map((m, i) => (
+          <FeaturedCard key={m.polymarket_id} m={m} active={i === activeIdx} />
+        ))}
+      </div>
+      {/* Dots */}
+      <div style={{ display: "flex", justifyContent: "center", gap: 8, marginTop: 14 }}>
+        {markets.map((_, i) => (
+          <button
+            key={i}
+            onClick={() => scrollTo(i)}
+            aria-label={`Go to slide ${i + 1}`}
+            style={{
+              width: i === activeIdx ? 24 : 8, height: 8,
+              borderRadius: 4, border: "none", cursor: "pointer",
+              background: i === activeIdx ? MM.green : MM.ghost,
+              transition: "all 0.25s",
+            }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FeaturedCard({ m, active }: { m: DbMarket; active: boolean }) {
+  const router = useRouter();
+  const yesP = m.last_trade_price ?? 0;
+  const noP = 1 - yesP;
+  const vol = compactVol(m.volume_num ?? m.volume ?? null);
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => router.push(`/markets/${m.polymarket_id}`)}
+      onKeyDown={(e) => { if (e.key === "Enter") router.push(`/markets/${m.polymarket_id}`); }}
+      style={{
+        flex: "0 0 340px",
+        scrollSnapAlign: "start",
+        borderRadius: 12,
+        overflow: "hidden",
+        border: `1px solid ${active ? "rgba(74,222,128,0.3)" : MM.border}`,
+        background: MM.surface,
+        cursor: "pointer",
+        transition: "border-color 0.2s, transform 0.2s",
+        position: "relative",
+      }}
+    >
+      {/* Image */}
+      <div style={{ height: 160, position: "relative", overflow: "hidden" }}>
+        {m.image_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={m.image_url} alt=""
+            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+          />
+        ) : (
+          <div style={{ width: "100%", height: "100%", background: "#111114" }} />
+        )}
+        <div style={{
+          position: "absolute", inset: 0,
+          background: "linear-gradient(0deg, rgba(12,12,14,0.95) 0%, rgba(12,12,14,0.2) 50%, transparent 100%)",
+        }} />
+        {/* Signal badge */}
+        <div style={{
+          position: "absolute", top: 10, right: 10,
+          display: "flex", alignItems: "center", gap: 5,
+          background: "rgba(0,0,0,0.6)", backdropFilter: "blur(6px)",
+          padding: "4px 10px", borderRadius: 6,
+          fontSize: 11, fontWeight: 600, fontFamily: MM.font,
+          color: divergenceColor(m.demo_score),
+        }}>
+          <span style={{
+            width: 6, height: 6, borderRadius: "50%",
+            background: divergenceColor(m.demo_score),
+          }} />
+          {divergenceLabel(m.demo_score)}
+        </div>
+        {/* Volume badge */}
+        <div style={{
+          position: "absolute", top: 10, left: 10,
+          background: "rgba(0,0,0,0.6)", backdropFilter: "blur(6px)",
+          padding: "4px 10px", borderRadius: 6,
+          fontSize: 11, color: MM.textSub, fontFamily: MM.font,
+        }}>
+          {vol} Vol
+        </div>
+        {/* Question overlay */}
+        <div style={{
+          position: "absolute", bottom: 0, left: 0, right: 0,
+          padding: "12px 14px",
+        }}>
+          <p style={{
+            fontSize: 14, fontWeight: 600, color: "#fff",
+            margin: 0, lineHeight: 1.45,
+            textShadow: "0 1px 4px rgba(0,0,0,0.5)",
+          }}>
+            {m.question}
+          </p>
+        </div>
+      </div>
+      {/* Footer */}
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "10px 14px", borderTop: `1px solid ${MM.border}`,
+      }}>
+        <div style={{ display: "flex", gap: 8 }}>
+          <span style={{
+            padding: "4px 10px", borderRadius: 5, fontSize: 12, fontWeight: 600,
+            background: MM.greenDim, color: MM.green, fontFamily: MM.font,
+          }}>
+            Yes {pct(yesP)}
+          </span>
+          <span style={{
+            padding: "4px 10px", borderRadius: 5, fontSize: 12, fontWeight: 600,
+            background: MM.redDim, color: MM.red, fontFamily: MM.font,
+          }}>
+            No {pct(noP)}
+          </span>
+        </div>
+        {m.featured && (
+          <span style={{
+            fontSize: 10, color: MM.amber, border: `1px solid rgba(251,191,36,0.3)`,
+            padding: "2px 8px", borderRadius: 4, letterSpacing: "0.05em",
+          }}>
+            FEATURED
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Market Card ─────────────────────────────────────────────────────────────
 
 function MarketCard({ m }: { m: DbMarket }) {
   const router = useRouter();
   const [hovered, setHovered] = useState(false);
 
-  const handleClick = () => router.push(`/markets/${m.polymarket_id}`);
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" || e.key === " ") handleClick();
-  };
+  const yesP = m.last_trade_price ?? 0;
+  const noP = 1 - yesP;
+  const vol = compactVol(m.volume_num ?? m.volume ?? null);
 
   return (
-    <li
+    <div
       role="button"
       tabIndex={0}
       aria-label={m.question}
-      onClick={handleClick}
-      onKeyDown={handleKeyDown}
+      onClick={() => router.push(`/markets/${m.polymarket_id}`)}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") router.push(`/markets/${m.polymarket_id}`); }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        display: "flex",
-        flexDirection: "column",
-        overflow: "hidden",
-        border: `1px solid ${hovered ? MM.borderBright : MM.border}`,
-        borderLeft: `2px solid ${hovered ? MM.green : "transparent"}`,
+        display: "flex", flexDirection: "column",
+        borderRadius: 10, overflow: "hidden",
+        border: `1px solid ${hovered ? MM.borderHover : MM.border}`,
         background: MM.surface,
-        borderRadius: 0,
-        transition: "border-color 0.2s, border-left-color 0.2s",
         cursor: "pointer",
+        transition: "border-color 0.2s, transform 0.15s",
+        transform: hovered ? "translateY(-2px)" : "none",
       }}
     >
       {/* Image */}
-      <div style={{ aspectRatio: "2/1", width: "100%", background: "#111114", position: "relative", overflow: "hidden" }}>
+      <div style={{
+        height: 120, position: "relative", overflow: "hidden",
+        background: "#111114",
+      }}>
         {m.image_url ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={m.image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-        ) : (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", fontSize: 11, color: MM.ghost }}>
-            no_image
-          </div>
-        )}
+          <img
+            src={m.image_url} alt=""
+            style={{ width: "100%", height: "100%", objectFit: "cover", opacity: hovered ? 1 : 0.85, transition: "opacity 0.2s" }}
+          />
+        ) : null}
+        {/* Signal dot */}
+        <div style={{
+          position: "absolute", top: 8, right: 8,
+          display: "flex", alignItems: "center", gap: 4,
+          background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)",
+          padding: "3px 8px", borderRadius: 5,
+          fontSize: 10, fontWeight: 600, fontFamily: MM.font,
+          color: divergenceColor(m.demo_score),
+        }}>
+          <span style={{
+            width: 5, height: 5, borderRadius: "50%",
+            background: divergenceColor(m.demo_score),
+          }} />
+          {divergenceLabel(m.demo_score)}
+        </div>
       </div>
+
       {/* Body */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8, padding: 14 }}>
-        <p style={{ fontSize: 12, fontWeight: 500, color: MM.text, margin: 0, lineHeight: 1.6 }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "12px 14px", gap: 10 }}>
+        <p style={{
+          fontSize: 13, fontWeight: 500, color: MM.text,
+          margin: 0, lineHeight: 1.5,
+          display: "-webkit-box", WebkitLineClamp: 3,
+          WebkitBoxOrient: "vertical", overflow: "hidden",
+        }}>
           {m.question}
         </p>
-        {/* Badges */}
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {m.active && (
-            <span style={{ fontSize: 10, letterSpacing: "0.1em", color: MM.green, border: `1px solid ${MM.green}`, padding: "2px 6px" }}>
-              ACTIVE
-            </span>
-          )}
-          {m.closed && (
-            <span style={{ fontSize: 10, letterSpacing: "0.1em", color: MM.ghost, border: `1px solid ${MM.border}`, padding: "2px 6px" }}>
-              CLOSED
-            </span>
-          )}
+
+        {/* Yes / No */}
+        <div style={{ display: "flex", gap: 6 }}>
+          <div style={{
+            flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
+            padding: "6px 0", borderRadius: 5,
+            background: MM.greenDim, fontSize: 12, fontWeight: 600,
+            color: MM.green, fontFamily: MM.font,
+          }}>
+            Yes {pct(yesP)}
+          </div>
+          <div style={{
+            flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
+            padding: "6px 0", borderRadius: 5,
+            background: MM.redDim, fontSize: 12, fontWeight: 600,
+            color: MM.red, fontFamily: MM.font,
+          }}>
+            No {pct(noP)}
+          </div>
+        </div>
+
+        {/* Bottom row */}
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          marginTop: "auto", paddingTop: 4,
+          borderTop: `1px solid ${MM.border}`,
+          fontSize: 11, color: MM.dim,
+        }}>
+          <span>{vol} Vol</span>
           {m.featured && (
-            <span style={{ fontSize: 10, letterSpacing: "0.1em", color: "#FCD34D", border: "1px solid rgba(252,211,77,0.4)", padding: "2px 6px" }}>
-              FEATURED
-            </span>
+            <span style={{ color: MM.amber, fontSize: 10 }}>FEATURED</span>
           )}
         </div>
-        {/* Stats */}
-        <dl style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 8px", fontSize: 11, margin: 0 }}>
-          <dt style={{ color: MM.ghost }}>volume</dt>
-          <dd style={{ textAlign: "right", color: MM.text, margin: 0 }}>{formatUsd(m.volume_num ?? m.volume ?? null)}</dd>
-          <dt style={{ color: MM.ghost }}>last_trade</dt>
-          <dd style={{ textAlign: "right", color: MM.text, margin: 0 }}>{formatPrice(m.last_trade_price)}</dd>
-          <dt style={{ color: MM.ghost }}>ends</dt>
-          <dd style={{ textAlign: "right", color: MM.dim, margin: 0 }}>{formatEndDate(m.end_date)}</dd>
-        </dl>
       </div>
-    </li>
+    </div>
   );
 }
