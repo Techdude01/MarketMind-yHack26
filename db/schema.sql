@@ -89,3 +89,18 @@ CREATE TABLE IF NOT EXISTS market_gemini_summaries (
 
 CREATE INDEX IF NOT EXISTS idx_gemini_polymarket_created
     ON market_gemini_summaries (polymarket_id, created_at DESC);
+
+-- Paper trades table to store user-submitted paper trades --
+CREATE TABLE IF NOT EXISTS paper_trades (
+    id BIGSERIAL PRIMARY KEY,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    condition_id TEXT NOT NULL,
+    token_id NUMERIC(78, 0) NOT NULL,
+    side TEXT NOT NULL CHECK (side IN ('BUY', 'SELL')),
+    amount_usd NUMERIC(20, 6) NOT NULL,
+    price NUMERIC(20, 8) NOT NULL,
+
+    wallet_address TEXT NOT NULL,
+    signature TEXT NOT NULL
+);

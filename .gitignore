@@ -14,3 +14,5 @@ backend/.venv/
 /frontend/.DS_Store
 .ngrok-postgres.log
 .ngrok-postgres.pid
+
+/backend/node_modules

@@ -3,6 +3,7 @@ import random
 import time
 from typing import Any, Dict, Optional, Tuple
 
+import psycopg
 import requests
 from dotenv import load_dotenv
 from web3 import Web3
@@ -71,12 +72,54 @@ def _fetch_market_by_condition_id(condition_id: str) -> Dict[str, Any]:
     return market
 
 
+def save_paper_trade_minimal(
+    condition_id: str,
+    token_id: int,
+    side: str,
+    amount_usd: float,
+    price: float,
+    wallet_address: str,
+    signature: str,
+) -> int:
+    db_url = os.getenv("DATABASE_URL")
+    if not db_url:
+        raise ValueError("Missing DATABASE_URL in environment.")
+
+    sql = """
+    INSERT INTO paper_trades (
+        condition_id, token_id, side, amount_usd, price, wallet_address, signature
+    ) VALUES (
+        %(condition_id)s, %(token_id)s, %(side)s, %(amount_usd)s, %(price)s, %(wallet_address)s, %(signature)s
+    )
+    RETURNING id;
+    """
+
+    with psycopg.connect(db_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                sql,
+                {
+                    "condition_id": condition_id,
+                    "token_id": str(token_id),
+                    "side": side,
+                    "amount_usd": float(amount_usd),
+                    "price": float(price),
+                    "wallet_address": wallet_address,
+                    "signature": signature,
+                },
+            )
+            trade_id = cur.fetchone()[0]
+        conn.commit()
+
+    return trade_id
+
+
 def submit_trade(
     condition_id: str,
     token_id: int,
     amount: float,
     price: float,
-    post_order: bool = True,
+    side: str = "BUY",
     expiration_seconds: int = 86400,
     fee_rate_bps: int = 0,
     nonce: Optional[int] = None,
@@ -89,6 +132,8 @@ def submit_trade(
         raise ValueError("amount must be > 0")
     if not (0 < price < 1):
         raise ValueError("price must be between 0 and 1")
+    if side not in ("BUY", "SELL"):
+        raise ValueError("side must be BUY or SELL")
 
     w3, account = _load_web3_and_account()
     market = _fetch_market_by_condition_id(condition_id)
@@ -129,7 +174,7 @@ def submit_trade(
         "tokenId": int(token_id),
         "makerAmount": str(maker_amount),
         "takerAmount": str(taker_amount),
-        "side": 1,
+        "side": 1 if side == "BUY" else 0,
         "feeRateBps": str(fee_rate_bps),
         "nonce": int(nonce if nonce is not None else random.randint(1, 10**15)),
         "expiration": str(int(time.time()) + int(expiration_seconds)),
@@ -141,28 +186,35 @@ def submit_trade(
         message_data=message,
     )
     signature = signed.signature.hex() if hasattr(signed, "signature") else signed.hex()
-    payload: Dict[str, Any] = {**message, "signature": signature}
 
-    if not post_order:
-        print("Transaction prepared (dry run).")
-        return payload
-
-    resp = requests.post(
-        f"{API_BASE_URL}/orders",
-        json=payload,
-        headers=_headers(),
-        timeout=REQUEST_TIMEOUT,
+    trade_id = save_paper_trade_minimal(
+        condition_id=condition_id,
+        token_id=int(token_id),
+        side=side,
+        amount_usd=float(amount),
+        price=float(price),
+        wallet_address=account.address,
+        signature=signature,
     )
-    resp.raise_for_status()
-    print("Transaction submitted successfully.")
-    return resp.json()
+
+    print(f"Paper trade saved with id={trade_id}")
+
+    return {
+        "paper_trade_id": trade_id,
+        "condition_id": condition_id,
+        "token_id": int(token_id),
+        "side": side,
+        "amount": float(amount),
+        "price": float(price),
+        "wallet": account.address,
+    }
 
 
 def submit_trade_at_current_token_price(
     condition_id: str,
     token_id: int,
     amount: float,
-    post_order: bool = True,
+    side: str = "BUY",
 ) -> Dict[str, Any]:
     market = requests.get(
         f"{API_BASE_URL}/markets/{condition_id}",
@@ -187,19 +239,16 @@ def submit_trade_at_current_token_price(
         token_id=token_id,
         amount=amount,
         price=float(token_price),
-        post_order=post_order,
+        side=side,
     )
 
 
-# Mock test run
+# Mock test
 # if __name__ == "__main__":
-#     condition_id = "0xb48621f7eba07b0a3eeabc6afb09ae42490239903997b9d412b0f69aeb040c8b"
-#     token_id = 75467129615908319583031474642658885479135630431889036121812713428992454630178
-
 #     result = submit_trade_at_current_token_price(
-#         condition_id=condition_id,
-#         token_id=token_id,
+#         condition_id="0xb48621f7eba07b0a3eeabc6afb09ae42490239903997b9d412b0f69aeb040c8b",
+#         token_id=75467129615908319583031474642658885479135630431889036121812713428992454630178,
 #         amount=1.0,
-#         post_order=False,
+#         side="BUY",
 #     )
 #     print(result)
