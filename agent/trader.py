@@ -71,24 +71,20 @@ def _fetch_market_by_condition_id(condition_id: str) -> Dict[str, Any]:
     return market
 
 
-def _pick_token(tokens: list, yes_or_no: int) -> Dict[str, Any]:
-    if not isinstance(tokens, list) or len(tokens) < 2:
-        raise ValueError("Market does not have at least 2 tokens.")
-    if yes_or_no not in (1, 2):
-        raise ValueError("yes_or_no must be 1 (first token) or 2 (second token).")
-    return tokens[yes_or_no - 1]
-
-
 def submit_trade(
     condition_id: str,
+    token_id: int,
     amount: float,
-    yes_or_no: int,
     price: float,
     post_order: bool = True,
     expiration_seconds: int = 86400,
     fee_rate_bps: int = 0,
     nonce: Optional[int] = None,
 ) -> Dict[str, Any]:
+    if not (isinstance(condition_id, str) and condition_id.startswith("0x")):
+        raise ValueError("condition_id must be a 0x... hex string")
+    if int(token_id) <= 0:
+        raise ValueError("token_id must be a positive integer")
     if amount <= 0:
         raise ValueError("amount must be > 0")
     if not (0 < price < 1):
@@ -96,13 +92,13 @@ def submit_trade(
 
     w3, account = _load_web3_and_account()
     market = _fetch_market_by_condition_id(condition_id)
-    token = _pick_token(market.get("tokens", []), yes_or_no)
-    token_id = int(token["token_id"])
+
     if market.get("closed") or not market.get("accepting_orders"):
         raise ValueError(
             f"Market is not tradeable (closed={market.get('closed')}, "
             f"accepting_orders={market.get('accepting_orders')})."
         )
+
     market_label = market.get("question") or market.get("market_slug") or condition_id
     print(f"Wallet: {account.address}")
     print(f"Market: {market_label}")
@@ -111,11 +107,12 @@ def submit_trade(
     taker_amount = int(maker_amount * price)
 
     is_neg_risk = bool(market.get("neg_risk", False))
-
     env_standard = os.getenv("POLYMARKET_EIP712_VERIFIER_STANDARD")
     env_neg_risk = os.getenv("POLYMARKET_EIP712_VERIFIER_NEG_RISK")
-
     verifying_contract = env_neg_risk if is_neg_risk else env_standard
+
+    if not verifying_contract:
+        raise ValueError("Missing verifier env vars for EIP-712 domain.")
 
     domain = {
         "name": os.getenv("POLYMARKET_EIP712_DOMAIN_NAME", "Polymarket CLOB"),
@@ -129,7 +126,7 @@ def submit_trade(
     message = {
         "maker": account.address,
         "taker": ZERO_ADDRESS,
-        "tokenId": token_id,
+        "tokenId": int(token_id),
         "makerAmount": str(maker_amount),
         "takerAmount": str(taker_amount),
         "side": 1,
@@ -161,12 +158,10 @@ def submit_trade(
     return resp.json()
 
 
-if __name__ == "__main__":
-    result = submit_trade(
-        condition_id="0xb48621f7eba07b0a3eeabc6afb09ae42490239903997b9d412b0f69aeb040c8b",
-        amount=1.0,
-        yes_or_no=1,
-        price=0.25,
-        post_order=False,
-    )
-    print(result)
+result = submit_trade(
+    condition_id="0xb48621f7eba07b0a3eeabc6afb09ae42490239903997b9d412b0f69aeb040c8b",
+    token_id=75467129615908319583031474642658885479135630431889036121812713428992454630178,
+    amount=1.0,
+    price=0.043,
+    post_order=False,
+)
