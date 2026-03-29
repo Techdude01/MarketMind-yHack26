@@ -93,6 +93,45 @@ LIMIT %(limit)s
 
 COUNT_MARKETS_SQL = "SELECT COUNT(*) FROM polymarket_markets"
 
+GET_MARKET_BY_ID_SQL = """
+SELECT
+    polymarket_id,
+    slug,
+    question,
+    description,
+    resolution_source,
+    image_url,
+    icon_url,
+    start_date,
+    end_date,
+    created_at_api,
+    updated_at_api,
+    closed_time,
+    active,
+    closed,
+    archived,
+    featured,
+    new,
+    restricted,
+    last_trade_price,
+    best_bid,
+    best_ask,
+    spread,
+    volume,
+    volume_num,
+    volume_1wk,
+    volume_1mo,
+    volume_1yr,
+    liquidity,
+    outcomes,
+    outcome_prices,
+    clob_token_ids,
+    first_seen_at,
+    last_ingested_at
+FROM polymarket_markets
+WHERE polymarket_id = %(polymarket_id)s
+"""
+
 
 def _json_safe_value(v: Any) -> Any:
     if isinstance(v, Decimal):
@@ -151,6 +190,17 @@ def list_top_markets(conn, *, limit: int = 20) -> list[dict[str, Any]]:
             raw = dict(zip(colnames, rec))
             out.append(_serialize_market_row(raw))
     return out
+
+
+def get_market_by_id(conn, polymarket_id: int) -> dict[str, Any] | None:
+    """Fetch a single market by polymarket_id. Returns None if not found."""
+    with conn.cursor() as cur:
+        cur.execute(GET_MARKET_BY_ID_SQL, {"polymarket_id": polymarket_id})
+        colnames = [d[0] for d in cur.description]
+        rec = cur.fetchone()
+        if rec is None:
+            return None
+        return _serialize_market_row(dict(zip(colnames, rec)))
 
 
 def count_markets(conn) -> int:

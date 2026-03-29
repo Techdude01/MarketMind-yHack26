@@ -32,6 +32,22 @@ ORDER BY volume_num DESC NULLS LAST
 LIMIT %(limit)s
 """
 
+GET_LATEST_THESIS_SQL = """
+SELECT thesis_text, model, created_at
+FROM market_gemini_summaries
+WHERE polymarket_id = %(polymarket_id)s
+ORDER BY created_at DESC
+LIMIT 1
+"""
+
+GET_LATEST_TAVILY_SQL = """
+SELECT search_query, results, max_results, created_at
+FROM market_tavily_searches
+WHERE polymarket_id = %(polymarket_id)s
+ORDER BY created_at DESC
+LIMIT 1
+"""
+
 
 def insert_tavily_search(
     conn,
@@ -83,6 +99,36 @@ def insert_gemini_summary(
         if row is None:
             raise RuntimeError("INSERT market_gemini_summaries returned no id")
         return int(row[0])
+
+
+def get_latest_thesis(conn, polymarket_id: int) -> dict[str, Any] | None:
+    """Return the most recent Gemini thesis for a market, or None."""
+    from datetime import datetime
+
+    with conn.cursor() as cur:
+        cur.execute(GET_LATEST_THESIS_SQL, {"polymarket_id": polymarket_id})
+        row = cur.fetchone()
+        if row is None:
+            return None
+        thesis_text, model, created_at = row
+        return {
+            "thesis_text": thesis_text,
+            "model": model,
+            "created_at": created_at.isoformat() if isinstance(created_at, datetime) else created_at,
+        }
+
+
+def get_latest_tavily(conn, polymarket_id: int) -> list[dict[str, Any]]:
+    """Return news results from the most recent Tavily search, or empty list."""
+    with conn.cursor() as cur:
+        cur.execute(GET_LATEST_TAVILY_SQL, {"polymarket_id": polymarket_id})
+        row = cur.fetchone()
+        if row is None:
+            return []
+        _search_query, results, _max_results, _created_at = row
+        if not isinstance(results, list):
+            return []
+        return results
 
 
 def list_markets_for_research(conn, *, limit: int) -> list[dict[str, Any]]:

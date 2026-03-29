@@ -1,54 +1,63 @@
 from flask import Blueprint, jsonify
 
+from app.repositories.market_research import get_latest_tavily, get_latest_thesis
+
 thesis_bp = Blueprint("thesis", __name__)
 
 
-@thesis_bp.route("/thesis/<market_id>", methods=["GET"])
-def get_thesis(market_id):
+@thesis_bp.route("/thesis/<int:market_id>", methods=["GET"])
+def get_thesis(market_id: int):
     """
-    Get investment thesis for a market
+    Get investment thesis and news for a market.
     ---
     tags:
       - Thesis
-    summary: Retrieve or generate an investment thesis for a given market
+    summary: Latest Gemini thesis + Tavily news for a given market
     parameters:
       - name: market_id
         in: path
         required: true
-        type: string
-        description: The unique identifier of the prediction market
-        example: "market_abc123"
+        type: integer
+        description: The numeric Polymarket market ID
+        example: 12345
     responses:
       200:
-        description: Thesis retrieved (or stub) successfully
+        description: Thesis and news results
         schema:
           type: object
           properties:
             market_id:
-              type: string
-              example: "market_abc123"
+              type: integer
             thesis:
               type: object
               nullable: true
-              description: The generated investment thesis, or null if not yet available
-              example: null
-            message:
-              type: string
-              example: "stub — not yet wired to PostgreSQL"
-      404:
-        description: Market not found
-        schema:
-          type: object
-          properties:
-            error:
-              type: string
-              example: "Market not found"
+              properties:
+                thesis_text:
+                  type: string
+                model:
+                  type: string
+                created_at:
+                  type: string
+            news:
+              type: array
+              items:
+                type: object
+      503:
+        description: Database unavailable
     """
-    # TODO: wire to db query
-    return jsonify(
-        {
-            "market_id": market_id,
-            "thesis": None,
-            "message": "stub — not yet wired to PostgreSQL",
-        }
-    ), 200
+    from db import get_connection
+
+    try:
+        with get_connection() as conn:
+            thesis = get_latest_thesis(conn, market_id)
+            news_results = get_latest_tavily(conn, market_id)
+    except Exception as exc:
+        return jsonify({"error": str(exc), "code": "DATABASE_ERROR"}), 503
+
+    news = sorted(
+        (r for r in news_results if isinstance(r, dict)),
+        key=lambda r: float(r.get("score", 0)),
+        reverse=True,
+    )
+
+    return jsonify({"market_id": market_id, "thesis": thesis, "news": news}), 200
