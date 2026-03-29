@@ -131,6 +131,22 @@ def get_latest_tavily(conn, polymarket_id: int) -> list[dict[str, Any]]:
         return results
 
 
+HAS_ANALYSIS_SQL = """
+SELECT EXISTS (
+    SELECT 1 FROM market_gemini_summaries
+    WHERE polymarket_id = %(polymarket_id)s
+)
+"""
+
+
+def has_analysis(conn, polymarket_id: int) -> bool:
+    """True if at least one thesis row exists for this market."""
+    with conn.cursor() as cur:
+        cur.execute(HAS_ANALYSIS_SQL, {"polymarket_id": polymarket_id})
+        row = cur.fetchone()
+        return bool(row and row[0])
+
+
 def list_markets_for_research(conn, *, limit: int) -> list[dict[str, Any]]:
     """Top markets by ``volume_num`` for the research pipeline."""
     with conn.cursor() as cur:

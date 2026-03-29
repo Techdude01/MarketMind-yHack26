@@ -1,6 +1,7 @@
 from flask import Blueprint, jsonify
 
 from app.repositories.market_research import get_latest_tavily, get_latest_thesis
+from app.services.thesis_parse import parse_structured_thesis_fields
 
 thesis_bp = Blueprint("thesis", __name__)
 
@@ -60,4 +61,11 @@ def get_thesis(market_id: int):
         reverse=True,
     )
 
-    return jsonify({"market_id": market_id, "thesis": thesis, "news": news}), 200
+    thesis_payload = dict(thesis or {})
+    thesis_payload.update(
+      parse_structured_thesis_fields(
+        thesis_payload.get("thesis_text") if thesis_payload else None
+      )
+    )
+
+    return jsonify({"market_id": market_id, "thesis": thesis_payload or None, "news": news}), 200
