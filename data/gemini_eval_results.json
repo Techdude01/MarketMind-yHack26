@@ -1,0 +1,75 @@
+{
+  "summary": {
+    "rows_processed": 5,
+    "summary_input_column_priority": [
+      "reasoning_input",
+      "thesis_text"
+    ],
+    "summary_source_counts": {
+      "reasoning_input": 5
+    },
+    "category_counts": {
+      "general": 5
+    },
+    "action_counts": {
+      "ACT": 5
+    }
+  },
+  "records": [
+    {
+      "polymarket_id": 553878,
+      "question": "Will the Chicago Bulls win the 2026 NBA Finals?",
+      "category": "general",
+      "summary_source": "reasoning_input",
+      "summary_preview": "### 1. AI Models Competing in Prediction Markets - Forecaster Arena URL: https://www.forecasterarena.com/markets/1765056787079-j5pq77xd8 This market will resolve to \u201cYes\u201d if the Ch",
+      "sentiment_score": 0.0089,
+      "market_crowd_score": -0.998,
+      "divergence": 1.0069,
+      "action": "ACT"
+    },
+    {
+      "polymarket_id": 553882,
+      "question": "Will the Charlotte Hornets win the 2026 NBA Finals?",
+      "category": "general",
+      "summary_source": "reasoning_input",
+      "summary_preview": "### 1. Will the Charlotte Hornets win the 2026 NBA Finals? \u2014 0.9% Odds ... URL: http://www.almanac.ai/m/will-the-charlotte-hornets-win-the-2026-nba-finals # Will the Charlotte Horn",
+      "sentiment_score": -0.0143,
+      "market_crowd_score": -0.978,
+      "divergence": 0.9637,
+      "action": "ACT"
+    },
+    {
+      "polymarket_id": 558960,
+      "question": "Will Uzbekistan win the 2026 FIFA World Cup?",
+      "category": "general",
+      "summary_source": "reasoning_input",
+      "summary_preview": "### 1. Uzbekistan to win World Cup 2026 odds URL: https://www.squawka.com/en/outright-markets/uzbekistan-world-cup-2026-odds/ # Uzbekistan to win World Cup 2026 odds: Probability, ",
+      "sentiment_score": 0.304,
+      "market_crowd_score": -0.996,
+      "divergence": 1.3,
+      "action": "ACT"
+    },
+    {
+      "polymarket_id": 559664,
+      "question": "Will Raphael Warnock win the 2028 Democratic presidential nomination?",
+      "category": "general",
+      "summary_source": "reasoning_input",
+      "summary_preview": "### 1. CNN panel identifies 2028 frontrunners for Democrats URL: https://www.independent.co.uk/news/world/americas/us-politics/2028-election-democrats-nominee-raphael-warnock-b2890",
+      "sentiment_score": 0.0832,
+      "market_crowd_score": -0.99,
+      "divergence": 1.0732,
+      "action": "ACT"
+    },
+    {
+      "polymarket_id": 559666,
+      "question": "Will Tim Walz win the 2028 Democratic presidential nomination?",
+      "category": "general",
+      "summary_source": "reasoning_input",
+      "summary_preview": "### 1. Democratic Presidential Nominee 2028 - CryptoRank.io URL: https://cryptorank.io/prediction-markets/democratic-presidential-nominee-2028 Will Jon Ossoff win the 2028 Democrat",
+      "sentiment_score": 0.0752,
+      "market_crowd_score": -0.986,
+      "divergence": 1.0612,
+      "action": "ACT"
+    }
+  ]
+}
