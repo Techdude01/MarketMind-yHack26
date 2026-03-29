@@ -388,7 +388,6 @@ function FeaturedCard({ m }: { m: DbMarket }) {
   const yesP = m.last_trade_price ?? 0;
   const noP = 1 - yesP;
   const vol = compactVol(m.volume_num ?? m.volume ?? null);
-  const shift = probShift(m);
 
   return (
     <div
@@ -408,7 +407,6 @@ function FeaturedCard({ m }: { m: DbMarket }) {
         position: "relative",
       }}
     >
-      {/* Image */}
       <div style={{ height: 160, position: "relative", overflow: "hidden" }}>
         {m.image_url ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -423,24 +421,6 @@ function FeaturedCard({ m }: { m: DbMarket }) {
           position: "absolute", inset: 0,
           background: "linear-gradient(0deg, rgba(12,12,14,0.95) 0%, rgba(12,12,14,0.2) 50%, transparent 100%)",
         }} />
-        {/* Profit potential badge */}
-        <div style={{
-          position: "absolute", top: 10, right: 10,
-          display: "flex", alignItems: "center", gap: 6,
-          background: "rgba(0,0,0,0.65)", backdropFilter: "blur(6px)",
-          padding: "5px 10px", borderRadius: 6,
-          fontSize: 11, fontWeight: 600, fontFamily: MM.font,
-          color: profitColor(shift),
-        }}>
-          <span style={{
-            width: 6, height: 6, borderRadius: "50%",
-            background: profitColor(shift),
-          }} />
-          {profitLabel(shift)}
-          {shift != null && Math.abs(shift) >= 0.05 && (
-            <span style={{ fontSize: 9, opacity: 0.8 }}>{tradeDirection(shift)}</span>
-          )}
-        </div>
         {/* Volume badge */}
         <div style={{
           position: "absolute", top: 10, left: 10,
@@ -450,7 +430,6 @@ function FeaturedCard({ m }: { m: DbMarket }) {
         }}>
           {vol} Vol
         </div>
-        {/* Question overlay */}
         <div style={{
           position: "absolute", bottom: 0, left: 0, right: 0,
           padding: "12px 14px",
@@ -464,7 +443,6 @@ function FeaturedCard({ m }: { m: DbMarket }) {
           </p>
         </div>
       </div>
-      {/* Footer */}
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "10px 14px", borderTop: `1px solid ${MM.border}`,
@@ -483,16 +461,6 @@ function FeaturedCard({ m }: { m: DbMarket }) {
             No {pct(noP)}
           </span>
         </div>
-        {shift != null && Math.abs(shift) >= 0.05 && (
-          <span style={{
-            fontSize: 10, fontWeight: 600, fontFamily: MM.font,
-            color: profitColor(shift),
-            padding: "2px 8px", borderRadius: 4,
-            border: `1px solid ${profitColor(shift)}33`,
-          }}>
-            {tradeDirection(shift)}
-          </span>
-        )}
       </div>
     </div>
   );
@@ -507,7 +475,6 @@ function MarketCard({ m }: { m: DbMarket }) {
   const yesP = m.last_trade_price ?? 0;
   const noP = 1 - yesP;
   const vol = compactVol(m.volume_num ?? m.volume ?? null);
-  const shift = probShift(m);
 
   return (
     <div
@@ -528,7 +495,6 @@ function MarketCard({ m }: { m: DbMarket }) {
         transform: hovered ? "translateY(-2px)" : "none",
       }}
     >
-      {/* Image */}
       <div style={{
         height: 120, position: "relative", overflow: "hidden",
         background: "#111114",
@@ -540,24 +506,8 @@ function MarketCard({ m }: { m: DbMarket }) {
             style={{ width: "100%", height: "100%", objectFit: "cover", opacity: hovered ? 1 : 0.85, transition: "opacity 0.2s" }}
           />
         ) : null}
-        {/* Profit potential badge */}
-        <div style={{
-          position: "absolute", top: 8, right: 8,
-          display: "flex", alignItems: "center", gap: 4,
-          background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)",
-          padding: "3px 8px", borderRadius: 5,
-          fontSize: 10, fontWeight: 600, fontFamily: MM.font,
-          color: profitColor(shift),
-        }}>
-          <span style={{
-            width: 5, height: 5, borderRadius: "50%",
-            background: profitColor(shift),
-          }} />
-          {profitLabel(shift)}
-        </div>
       </div>
 
-      {/* Body */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "12px 14px", gap: 10 }}>
         <p style={{
           fontSize: 13, fontWeight: 500, color: MM.text,
@@ -568,7 +518,6 @@ function MarketCard({ m }: { m: DbMarket }) {
           {m.question}
         </p>
 
-        {/* Yes / No */}
         <div style={{ display: "flex", gap: 6 }}>
           <div style={{
             flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
@@ -588,7 +537,6 @@ function MarketCard({ m }: { m: DbMarket }) {
           </div>
         </div>
 
-        {/* Bottom row */}
         <div style={{
           display: "flex", alignItems: "center", justifyContent: "space-between",
           marginTop: "auto", paddingTop: 4,
@@ -596,11 +544,6 @@ function MarketCard({ m }: { m: DbMarket }) {
           fontSize: 11, color: MM.dim,
         }}>
           <span>{vol} Vol</span>
-          {shift != null && Math.abs(shift) >= 0.05 && (
-            <span style={{ color: profitColor(shift), fontSize: 10, fontWeight: 600 }}>
-              {tradeDirection(shift)}
-            </span>
-          )}
         </div>
       </div>
     </div>

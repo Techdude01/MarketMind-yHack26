@@ -167,7 +167,7 @@ def create_app():
                         RETURNING id, created_at
                         """,
                         (
-                            str(data["conditionId"]),
+                            str(data["market"]),
                             str(data["tokenId"]),
                             side,
                             float(data["amountUsd"]),
@@ -193,16 +193,20 @@ def create_app():
 
         try:
             wallet = request.args.get("wallet")
-            query = '''
-                SELECT id, created_at, condition_id, token_id, side, amount_usd, price, wallet_address,
-                   signature, market, quantity, entry_price, exit_price, status, pnl, opened_at, closed_at
+            query = """
+                SELECT
+                    id, created_at, condition_id, token_id, side,
+                    amount_usd, price, wallet_address, signature, market,
+                    quantity, entry_price, exit_price, status, pnl,
+                    opened_at, closed_at
                 FROM paper_trades
-            '''
+            """
             params = []
             if wallet:
-                query += " WHERE wallet_address = %s"
+                query += " WHERE LOWER(wallet_address) = LOWER(%s)"
                 params.append(wallet)
             query += " ORDER BY id DESC LIMIT 100"
+
             with get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(query, params)
@@ -212,23 +216,23 @@ def create_app():
                 ok=True,
                 data=[
                     {
-                        "id": r[0],
-                        "createdAt": r[1].isoformat() if isinstance(r[1], datetime) else r[1],
-                        "conditionId": r[2],
-                        "tokenId": str(r[3]),
-                        "side": r[4],
-                        "amountUsd": float(r[5]),
-                        "price": float(r[6]),
+                        "id":            r[0],
+                        "createdAt":     r[1].isoformat() if isinstance(r[1], datetime) else r[1],
+                        "conditionId":   r[2],
+                        "tokenId":       str(r[3]),
+                        "side":          r[4],
+                        "amountUsd":     float(r[5]),
+                        "price":         float(r[6]),
                         "walletAddress": r[7],
-                        "signature": r[8],
-                        "market": r[9],
-                        "quantity": float(r[10]) if r[10] is not None else None,
-                        "entryPrice": float(r[11]) if r[11] is not None else None,
-                        "exitPrice": float(r[12]) if r[12] is not None else None,
-                        "status": r[13],
-                        "pnl": float(r[14]) if r[14] is not None else None,
-                        "openedAt": r[15].isoformat() if r[15] else None,
-                        "closedAt": r[16].isoformat() if r[16] else None,
+                        "signature":     r[8],
+                        "market":        r[9],
+                        "quantity":      float(r[10]) if r[10] is not None else None,
+                        "entryPrice":    float(r[11]) if r[11] is not None else None,
+                        "exitPrice":     float(r[12]) if r[12] is not None else None,
+                        "status":        r[13],
+                        "pnl":           float(r[14]) if r[14] is not None else None,
+                        "openedAt":      r[15].isoformat() if r[15] else None,
+                        "closedAt":      r[16].isoformat() if r[16] else None,
                     }
                     for r in rows
                 ],

@@ -20,15 +20,15 @@ function StatusBadge({ status }: { status: Trade["status"] }) {
   const { color, border } = colors[status] || { color: MM.dim, border: MM.border };
   return (
     <span style={{ fontSize: 10, letterSpacing: "0.1em", color, border: `1px solid ${border}`, padding: "2px 6px" }}>
-      {status ? status.toUpperCase() : "UNKNOWN"}
+      {status}
     </span>
   );
 }
 
 export default function TradesTable({ trades }: { trades: Trade[] }) {
   const sectionRef = useRef<HTMLDivElement>(null);
-  const [sortKey, setSortKey]   = useState<SortKey>("openedAt");
-  const [sortDir, setSortDir]   = useState<1 | -1>(-1);
+  const [sortKey, setSortKey] = useState<SortKey>("openedAt");
+  const [sortDir, setSortDir] = useState<1 | -1>(-1);
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
 
   useEffect(() => {
@@ -37,7 +37,10 @@ export default function TradesTable({ trades }: { trades: Trade[] }) {
         entries.forEach((entry) => {
           if (entry.isIntersecting) {
             entry.target.querySelectorAll<HTMLElement>("[data-anim]").forEach((el, i) => {
-              setTimeout(() => { el.style.opacity = "1"; el.style.transform = "translateY(0)"; }, i * 40);
+              setTimeout(() => {
+                el.style.opacity = "1";
+                el.style.transform = "translateY(0)";
+              }, i * 40);
             });
           }
         });
@@ -46,7 +49,7 @@ export default function TradesTable({ trades }: { trades: Trade[] }) {
     );
     if (sectionRef.current) observer.observe(sectionRef.current);
     return () => observer.disconnect();
-  }, []);
+  }, [trades]);
 
   const handleSort = (key: SortKey) => {
     if (key === sortKey) setSortDir((d) => (d === 1 ? -1 : 1));
@@ -60,25 +63,42 @@ export default function TradesTable({ trades }: { trades: Trade[] }) {
   });
 
   const cols: { key: SortKey | null; label: string; align: "left" | "right" | "center" }[] = [
-    { key: "market",     label: "MARKET",       align: "left" },
-    { key: "side",       label: "SIDE",         align: "center" },
-    { key: "quantity",   label: "QTY",          align: "right" },
-    { key: "entryPrice", label: "ENTRY",        align: "right" },
-    { key: null,         label: "EXIT",         align: "right" },
-    { key: "pnl",        label: "P&L",          align: "right" },
-    { key: null,         label: "STATUS",       align: "center" },
-    { key: "openedAt",   label: "OPENED",       align: "right" },
+    { key: "market",     label: "MARKET",  align: "left" },
+    { key: "side",       label: "SIDE",    align: "center" },
+    { key: "quantity",   label: "QTY",     align: "right" },
+    { key: "entryPrice", label: "ENTRY",   align: "right" },
+    { key: null,         label: "EXIT",    align: "right" },
+    { key: "pnl",        label: "P&L",     align: "right" },
+    { key: null,         label: "STATUS",  align: "center" },
+    { key: "openedAt",   label: "OPENED",  align: "right" },
   ];
 
   const thStyle: React.CSSProperties = {
-    padding: "8px 12px", fontSize: 10, letterSpacing: "0.12em",
-    color: MM.ghost, fontWeight: 400, whiteSpace: "nowrap",
-    cursor: "pointer", userSelect: "none", background: MM.bg,
-    border: `1px solid ${MM.border}`, borderTop: "none", borderLeft: "none",
+    padding: "8px 12px",
+    fontSize: 10,
+    letterSpacing: "0.12em",
+    color: MM.ghost,
+    fontWeight: 400,
+    whiteSpace: "nowrap",
+    cursor: "pointer",
+    userSelect: "none",
+    background: MM.bg,
+    border: `1px solid ${MM.border}`,
+    borderTop: "none",
+    borderLeft: "none",
   };
 
   return (
-    <div ref={sectionRef} style={{ border: `1px solid ${MM.border}`, background: MM.surface, borderRadius: 0, overflow: "hidden", fontFamily: MM.font }}>
+    <div
+      ref={sectionRef}
+      style={{
+        border: `1px solid ${MM.border}`,
+        background: MM.surface,
+        borderRadius: 0,
+        overflow: "hidden",
+        fontFamily: MM.font,
+      }}
+    >
       {/* Header */}
       <div style={{
         display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -89,29 +109,41 @@ export default function TradesTable({ trades }: { trades: Trade[] }) {
         <span>{trades.length} trades</span>
       </div>
 
-      {/* Scrollable table wrapper */}
-      <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-          <thead>
+      {/* Table — no overflowX so market column can wrap freely */}
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+        <thead>
+          <tr>
+            {cols.map(({ key, label, align }) => (
+              <th
+                key={label}
+                onClick={() => key && handleSort(key)}
+                style={{ ...thStyle, textAlign: align, cursor: key ? "pointer" : "default" }}
+                onMouseEnter={(e) => key && (e.currentTarget.style.color = MM.green)}
+                onMouseLeave={(e) => (e.currentTarget.style.color = MM.ghost)}
+              >
+                {label}
+                {key && sortKey === key ? (sortDir === 1 ? " ↑" : " ↓") : ""}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.length === 0 ? (
             <tr>
-              {cols.map(({ key, label, align }) => (
-                <th
-                  key={label}
-                  onClick={() => key && handleSort(key)}
-                  style={{ ...thStyle, textAlign: align, cursor: key ? "pointer" : "default" }}
-                  onMouseEnter={(e) => key && (e.currentTarget.style.color = MM.green)}
-                  onMouseLeave={(e) => (e.currentTarget.style.color = MM.ghost)}
-                >
-                  {label}
-                  {key && sortKey === key ? (sortDir === 1 ? " ↑" : " ↓") : ""}
-                </th>
-              ))}
+              <td
+                colSpan={8}
+                style={{ padding: 32, textAlign: "center", color: MM.dim, fontSize: 12 }}
+              >
+                No trades found for this wallet.
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {sorted.map((t, idx) => {
+          ) : (
+            sorted.map((t, idx) => {
               const isHovered = hoveredRow === t.id;
-              const pnlStr = t.pnl === null ? "—" : `${t.pnl >= 0 ? "+" : ""}$${Math.abs(t.pnl).toFixed(2)}`;
+              const pnlStr =
+                t.pnl === null
+                  ? "—"
+                  : `${t.pnl >= 0 ? "+" : ""}$${Math.abs(t.pnl).toFixed(2)}`;
               return (
                 <tr
                   key={t.id}
@@ -122,40 +154,53 @@ export default function TradesTable({ trades }: { trades: Trade[] }) {
                     opacity: 0,
                     transform: "translateY(8px)",
                     transition: "all 0.4s ease, background 0.15s",
-                    background: isHovered ? "rgba(74,222,128,0.04)" : idx % 2 === 0 ? MM.surface : MM.bg,
+                    background: isHovered
+                      ? "rgba(74,222,128,0.04)"
+                      : idx % 2 === 0
+                      ? MM.surface
+                      : MM.bg,
                     borderLeft: `2px solid ${isHovered ? MM.green : "transparent"}`,
                   }}
                 >
-                  <td style={{ padding: "10px 12px", color: MM.text, whiteSpace: "nowrap", borderBottom: `1px solid ${MM.border}` }}>
-                    {t.market}
+                  {/* Market — wraps to full name */}
+                  <td style={{
+                    padding: "10px 12px",
+                    color: MM.text,
+                    borderBottom: `1px solid ${MM.border}`,
+                    whiteSpace: "normal",
+                    wordBreak: "break-word",
+                    lineHeight: 1.6,
+                    minWidth: 180,
+                  }}>
+                    {t.market ?? "—"}
                   </td>
                   <td style={{ padding: "10px 12px", textAlign: "center", borderBottom: `1px solid ${MM.border}` }}>
                     <span style={{ color: t.side === "YES" ? MM.green : MM.red, fontWeight: 500 }}>{t.side}</span>
                   </td>
-                  <td style={{ padding: "10px 12px", textAlign: "right", color: MM.dim, borderBottom: `1px solid ${MM.border}` }}>
-                    {t.quantity}
+                  <td style={{ padding: "10px 12px", textAlign: "right", color: MM.dim, whiteSpace: "nowrap", borderBottom: `1px solid ${MM.border}` }}>
+                    {t.quantity?.toFixed(2) ?? "—"}
                   </td>
-                  <td style={{ padding: "10px 12px", textAlign: "right", color: MM.text, borderBottom: `1px solid ${MM.border}` }}>
-                    {t.entryPrice.toFixed(3)}
+                  <td style={{ padding: "10px 12px", textAlign: "right", color: MM.text, whiteSpace: "nowrap", borderBottom: `1px solid ${MM.border}` }}>
+                    {t.entryPrice?.toFixed(4) ?? "—"}
                   </td>
-                  <td style={{ padding: "10px 12px", textAlign: "right", color: MM.dim, borderBottom: `1px solid ${MM.border}` }}>
-                    {t.exitPrice?.toFixed(3) ?? "—"}
+                  <td style={{ padding: "10px 12px", textAlign: "right", color: MM.dim, whiteSpace: "nowrap", borderBottom: `1px solid ${MM.border}` }}>
+                    {t.exitPrice?.toFixed(4) ?? "—"}
                   </td>
-                  <td style={{ padding: "10px 12px", textAlign: "right", fontWeight: 600, color: pnlColor(t.pnl, t.status), borderBottom: `1px solid ${MM.border}` }}>
+                  <td style={{ padding: "10px 12px", textAlign: "right", fontWeight: 600, whiteSpace: "nowrap", color: pnlColor(t.pnl, t.status), borderBottom: `1px solid ${MM.border}` }}>
                     {pnlStr}
                   </td>
-                  <td style={{ padding: "10px 12px", textAlign: "center", borderBottom: `1px solid ${MM.border}` }}>
+                  <td style={{ padding: "10px 12px", textAlign: "center", whiteSpace: "nowrap", borderBottom: `1px solid ${MM.border}` }}>
                     <StatusBadge status={t.status} />
                   </td>
                   <td style={{ padding: "10px 12px", textAlign: "right", color: MM.ghost, whiteSpace: "nowrap", borderBottom: `1px solid ${MM.border}` }}>
-                    {t.openedAt}
+                    {t.openedAt ? new Date(t.openedAt).toLocaleDateString() : "—"}
                   </td>
                 </tr>
               );
-            })}
-          </tbody>
-        </table>
-      </div>
+            })
+          )}
+        </tbody>
+      </table>
     </div>
   );
 }

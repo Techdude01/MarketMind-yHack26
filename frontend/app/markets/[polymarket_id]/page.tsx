@@ -335,7 +335,7 @@ function profitLabel(shift: number | null): string {
 
 function tradeDirection(shift: number | null): string {
   if (shift == null) return "";
-  if (Math.abs(shift) < 0.05) return "Hold";
+  if (Math.abs(shift) < 0.05) return "";
   return shift > 0 ? "Buy Yes" : "Buy No";
 }
 
@@ -370,8 +370,7 @@ function StatusBadge({
   label: string;
   color: string;
   borderColor: string;
-}) {
-  return (
+}) {  return (
     <span
       style={{
         fontSize: 10,
@@ -388,7 +387,7 @@ function StatusBadge({
 }
 
 function StatCell({ label, value }: { label: string; value: string }) {
-  return (
+   return (
     <div
       style={{
         background: MM.surface2,
@@ -476,6 +475,78 @@ function CardShell({ children }: { children: ReactNode }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function MarketDetailPage() {
+    const [tradeLoading, setTradeLoading] = useState(false);
+const [tradeSuccess, setTradeSuccess] = useState(false);
+const [tradeError, setTradeError] = useState<string>("");
+const [wallet, setWallet] = useState<string | null>(null);
+
+useEffect(() => {
+  // Read from sessionStorage (set by Nav.tsx on connect)
+  if (typeof window !== "undefined") {
+    if (!sessionStorage.getItem("wallet_disconnected")) {
+      const eth = (window as any).ethereum;
+      if (eth) {
+        eth.request({ method: "eth_accounts" }).then((accounts: string[]) => {
+          if (accounts?.[0]) setWallet(accounts[0]);
+        }).catch(() => {});
+      }
+    }
+  }
+}, []);
+
+const handleRecommendedTrade = async (direction: "yes" | "no") => {
+  if (!wallet) {
+    setTradeError("Connect your wallet first.");
+    return;
+  }
+  if (!market) return;
+
+  // Pick the token id for YES (index 0) or NO (index 1)
+  const tokenIds = market.clob_token_ids ?? [];
+  const tokenId = direction === "yes" ? tokenIds[0] : tokenIds[1];
+  if (!tokenId) {
+    setTradeError("No token ID found for this outcome.");
+    return;
+  }
+
+  setTradeLoading(true);
+  setTradeError("");
+  setTradeSuccess(false);
+
+  try {
+    const res = await fetch(`${BASE_URL}/api/trades/mock`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        conditionId: String(market.polymarket_id),
+        tokenId: tokenId,
+        side: "BUY",
+        amountUsd: 1.0,
+        price: market.last_trade_price ?? 0.5,
+        walletAddress: wallet,
+        signature: "0xmocksig_" + Date.now(),
+        market: market.question,
+        quantity: 1.0,
+        entryPrice: market.last_trade_price ?? 0.5,
+        status: "OPEN",
+        pnl: 0,
+        openedAt: new Date().toISOString(),
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      setTradeError(data.error ?? `HTTP ${res.status}`);
+      return;
+    }
+    setTradeSuccess(true);
+    setTimeout(() => setTradeSuccess(false), 3000);
+  } catch (e) {
+    setTradeError(e instanceof Error ? e.message : "Trade failed");
+  } finally {
+    setTradeLoading(false);
+  }
+};
   const params = useParams();
   const polymarket_id = Number(params["polymarket_id"]);
 
@@ -1066,15 +1137,42 @@ export default function MarketDetailPage() {
                             profit potential
                           </span>
                           {shift != null && Math.abs(shift) >= 0.05 && (
-                            <span style={{
-                              fontSize: 10, fontWeight: 600, color: pColor,
-                              padding: "2px 8px", borderRadius: 4,
-                              border: `1px solid ${pColor}33`,
-                              marginLeft: 4,
-                            }}>
-                              {tradeDirection(shift)}
-                            </span>
-                          )}
+  <div style={{ display: "flex", flexDirection: "column", gap: 4, marginLeft: 8 }}>
+    <button
+      type="button"
+      disabled={tradeLoading || tradeSuccess}
+      onClick={() => handleRecommendedTrade(shift > 0 ? "yes" : "no")}
+      style={{
+        fontSize: 12,
+        fontWeight: 600,
+        color: MM.bg,
+        background: tradeSuccess ? MM.green : shift > 0 ? MM.green : MM.red,
+        padding: "6px 18px",
+        borderRadius: 0,
+        border: "none",
+        cursor: tradeLoading || tradeSuccess ? "not-allowed" : "pointer",
+        opacity: tradeLoading ? 0.7 : 1,
+        transition: "opacity 0.2s",
+        fontFamily: MM.font,
+        letterSpacing: "0.04em",
+      }}
+    >
+      {tradeSuccess
+        ? "✓ trade_recorded"
+        : tradeLoading
+        ? "_ recording..."
+        : shift > 0
+        ? "> buy_yes"
+        : "> buy_no"}
+    </button>
+    {tradeError && (
+      <span style={{ fontSize: 10, color: MM.red }}>{tradeError}</span>
+    )}
+    {!wallet && (
+      <span style={{ fontSize: 10, color: MM.yellow }}>wallet not connected</span>
+    )}
+  </div>
+)}
                         </div>
 
                         {/* AI vs Market comparison */}
