@@ -286,36 +286,16 @@ export function StoredMarketsPanel() {
 
 function FeaturedCarousel({ markets }: { markets: DbMarket[] }) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [activeIdx, setActiveIdx] = useState(0);
-  const pauseRef = useRef(false);
 
-  useEffect(() => {
-    const iv = setInterval(() => {
-      if (pauseRef.current || !scrollRef.current) return;
-      const next = (activeIdx + 1) % markets.length;
-      setActiveIdx(next);
-      const el = scrollRef.current;
-      const card = el.children[next] as HTMLElement | undefined;
-      if (card) {
-        el.scrollTo({ left: card.offsetLeft - 12, behavior: "smooth" });
-      }
-    }, 4000);
-    return () => clearInterval(iv);
-  }, [activeIdx, markets.length]);
-
-  const scrollTo = (idx: number) => {
-    setActiveIdx(idx);
+  const scroll = (dir: "left" | "right") => {
     const el = scrollRef.current;
     if (!el) return;
-    const card = el.children[idx] as HTMLElement | undefined;
-    if (card) el.scrollTo({ left: card.offsetLeft - 12, behavior: "smooth" });
+    const amount = 354;
+    el.scrollBy({ left: dir === "left" ? -amount : amount, behavior: "smooth" });
   };
 
   return (
-    <div
-      onMouseEnter={() => { pauseRef.current = true; }}
-      onMouseLeave={() => { pauseRef.current = false; }}
-    >
+    <div>
       <div
         ref={scrollRef}
         style={{
@@ -324,31 +304,52 @@ function FeaturedCarousel({ markets }: { markets: DbMarket[] }) {
           paddingBottom: 4,
         }}
       >
-        {markets.map((m, i) => (
-          <FeaturedCard key={m.polymarket_id} m={m} active={i === activeIdx} />
+        {markets.map((m) => (
+          <FeaturedCard key={m.polymarket_id} m={m} />
         ))}
       </div>
-      {/* Dots */}
-      <div style={{ display: "flex", justifyContent: "center", gap: 8, marginTop: 14 }}>
-        {markets.map((_, i) => (
-          <button
-            key={i}
-            onClick={() => scrollTo(i)}
-            aria-label={`Go to slide ${i + 1}`}
-            style={{
-              width: i === activeIdx ? 24 : 8, height: 8,
-              borderRadius: 4, border: "none", cursor: "pointer",
-              background: i === activeIdx ? MM.green : MM.ghost,
-              transition: "all 0.25s",
-            }}
-          />
-        ))}
+      {/* Arrows */}
+      <div style={{ display: "flex", justifyContent: "center", gap: 16, marginTop: 14 }}>
+        <button
+          onClick={() => scroll("left")}
+          aria-label="Scroll left"
+          style={{
+            width: 36, height: 36, borderRadius: 8,
+            border: `1px solid ${MM.border}`, background: MM.surface,
+            color: MM.dim, cursor: "pointer", display: "flex",
+            alignItems: "center", justifyContent: "center",
+            transition: "border-color 0.15s, color 0.15s",
+            fontSize: 18, fontFamily: MM.font,
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.borderColor = MM.green; e.currentTarget.style.color = MM.green; }}
+          onMouseLeave={(e) => { e.currentTarget.style.borderColor = MM.border; e.currentTarget.style.color = MM.dim; }}
+        >
+          &#8592;
+        </button>
+        <button
+          onClick={() => scroll("right")}
+          aria-label="Scroll right"
+          style={{
+            width: 36, height: 36, borderRadius: 8,
+            border: `1px solid ${MM.border}`, background: MM.surface,
+            color: MM.dim, cursor: "pointer", display: "flex",
+            alignItems: "center", justifyContent: "center",
+            transition: "border-color 0.15s, color 0.15s",
+            fontSize: 18, fontFamily: MM.font,
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.borderColor = MM.green; e.currentTarget.style.color = MM.green; }}
+          onMouseLeave={(e) => { e.currentTarget.style.borderColor = MM.border; e.currentTarget.style.color = MM.dim; }}
+        >
+          &#8594;
+        </button>
       </div>
     </div>
   );
 }
 
-function FeaturedCard({ m, active }: { m: DbMarket; active: boolean }) {
+// ── Featured Card ───────────────────────────────────────────────────────────
+
+function FeaturedCard({ m }: { m: DbMarket }) {
   const router = useRouter();
   const yesP = m.last_trade_price ?? 0;
   const noP = 1 - yesP;
@@ -365,7 +366,7 @@ function FeaturedCard({ m, active }: { m: DbMarket; active: boolean }) {
         scrollSnapAlign: "start",
         borderRadius: 12,
         overflow: "hidden",
-        border: `1px solid ${active ? "rgba(74,222,128,0.3)" : MM.border}`,
+        border: `1px solid ${MM.border}`,
         background: MM.surface,
         cursor: "pointer",
         transition: "border-color 0.2s, transform 0.2s",
