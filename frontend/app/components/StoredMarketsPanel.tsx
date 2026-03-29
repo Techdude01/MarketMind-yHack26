@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
-const defaultBase =
+const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:5001";
 
 // ── Design tokens ───────────────────────────────────────────
@@ -19,10 +19,6 @@ const MM = {
   red:         "#F87171",
   font:        "'JetBrains Mono', monospace",
 };
-
-function apiUrl(base: string, path: string): string {
-  return `${base.replace(/\/$/, "")}${path}`;
-}
 
 export type DbMarket = {
   polymarket_id: number;
@@ -76,16 +72,15 @@ type Props = {
 };
 
 export function StoredMarketsPanel({ title = "Markets" }: Props) {
-  const [baseUrl, setBaseUrl] = useState(defaultBase);
   const [markets, setMarkets] = useState<DbMarket[]>([]);
-  const [loading, setLoading] = useState<"list" | "ingest" | null>(null);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>("");
 
   const loadMarkets = useCallback(async () => {
-    setLoading("list");
+    setLoading(true);
     setError("");
     try {
-      const res = await fetch(apiUrl(baseUrl, "/markets"));
+      const res = await fetch(`${API_BASE}/markets/homepage`);
       const body: unknown = await res.json().catch(() => ({}));
       if (!res.ok) {
         const err =
@@ -111,41 +106,13 @@ export function StoredMarketsPanel({ title = "Markets" }: Props) {
       setError(e instanceof Error ? e.message : String(e));
       setMarkets([]);
     } finally {
-      setLoading(null);
+      setLoading(false);
     }
-  }, [baseUrl]);
+  }, []);
 
   useEffect(() => {
     void loadMarkets();
   }, [loadMarkets]);
-
-  const refreshFromGamma = useCallback(async () => {
-    setLoading("ingest");
-    setError("");
-    try {
-      const res = await fetch(apiUrl(baseUrl, "/ingest/markets"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-      const body: unknown = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const err =
-          typeof body === "object" &&
-          body !== null &&
-          "error" in body &&
-          typeof (body as { error: unknown }).error === "string"
-            ? (body as { error: string }).error
-            : `HTTP ${res.status}`;
-        setError(err);
-        return;
-      }
-      await loadMarkets();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(null);
-    }
-  }, [baseUrl, loadMarkets]);
 
   return (
     <div style={{ maxWidth: 1000, margin: "0 auto", padding: "32px 24px", fontFamily: MM.font }}>
@@ -157,56 +124,8 @@ export function StoredMarketsPanel({ title = "Markets" }: Props) {
             {title}
           </h1>
           <p style={{ marginTop: 6, fontSize: 12, color: MM.dim, maxWidth: 480 }}>
-            Data from Postgres via{" "}
-            <code style={{ color: MM.green, background: "rgba(74,222,128,0.08)", padding: "1px 5px" }}>GET /markets</code>.
-            {" "}Refresh ingests from{" "}
-            <code style={{ color: MM.green, background: "rgba(74,222,128,0.08)", padding: "1px 5px" }}>Polymarket Gamma</code>.
+            Curated homepage markets ranked by volume and activity.
           </p>
-        </div>
-        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12 }}>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 11, color: MM.ghost }}>
-            api_base
-            <input
-              type="url"
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-              style={{
-                width: 220, border: `1px solid ${MM.border}`, background: MM.surface,
-                color: MM.text, padding: "6px 10px", fontSize: 12, fontFamily: MM.font,
-                outline: "none", borderRadius: 0,
-              }}
-            />
-          </label>
-          <button
-            type="button"
-            disabled={loading !== null}
-            onClick={() => void loadMarkets()}
-            style={{
-              border: `1px solid ${MM.border}`, background: "none", color: MM.dim,
-              padding: "8px 16px", fontSize: 12, fontFamily: MM.font, cursor: "pointer",
-              borderRadius: 0, transition: "border-color 0.2s, color 0.2s",
-              opacity: loading !== null ? 0.5 : 1,
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.borderColor = MM.green; e.currentTarget.style.color = MM.green; }}
-            onMouseLeave={(e) => { e.currentTarget.style.borderColor = MM.border; e.currentTarget.style.color = MM.dim; }}
-          >
-            _ reload
-          </button>
-          <button
-            type="button"
-            disabled={loading !== null}
-            onClick={() => void refreshFromGamma()}
-            style={{
-              border: "none", background: MM.green, color: MM.bg,
-              padding: "8px 16px", fontSize: 12, fontFamily: MM.font, cursor: "pointer",
-              borderRadius: 0, fontWeight: 500, transition: "opacity 0.2s",
-              opacity: loading !== null ? 0.5 : 1,
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.85")}
-            onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
-          >
-            {">"} refresh_markets
-          </button>
         </div>
       </div>
 
@@ -216,15 +135,12 @@ export function StoredMarketsPanel({ title = "Markets" }: Props) {
           error: {error}
         </div>
       ) : null}
-      {loading === "list" && markets.length === 0 ? (
+      {loading && markets.length === 0 ? (
         <div style={{ fontSize: 12, color: MM.dim }}>fetching markets...</div>
-      ) : null}
-      {loading === "ingest" ? (
-        <div style={{ marginBottom: 16, fontSize: 12, color: MM.dim }}>ingesting from Polymarket Gamma...</div>
       ) : null}
       {!loading && markets.length === 0 && !error ? (
         <div style={{ fontSize: 12, color: MM.ghost }}>
-          no_rows_found — click <span style={{ color: MM.green }}>{"> refresh_markets"}</span> to ingest from Gamma.
+          no markets available yet.
         </div>
       ) : null}
 

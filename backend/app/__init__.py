@@ -134,4 +134,106 @@ def create_app():
 
         return jsonify(rows=out)
 
+    @app.route("/api/trades/mock", methods=["POST"])
+    def mock_trade():
+        from db import get_connection
+
+        data = request.get_json(silent=True) or {}
+        required = [
+            "walletAddress",
+            "conditionId",
+            "tokenId",
+            "side",
+            "amountUsd",
+            "price",
+            "signature",
+        ]
+        missing = [k for k in required if k not in data]
+        if missing:
+            return jsonify(ok=False, error=f"Missing fields: {', '.join(missing)}"), 400
+
+        side = str(data["side"]).upper()
+        if side not in ("BUY", "SELL"):
+            return jsonify(ok=False, error="side must be BUY or SELL"), 400
+
+        try:
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO paper_trades
+                        (condition_id, token_id, side, amount_usd, price, wallet_address, signature)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        RETURNING id, created_at
+                        """,
+                        (
+                            str(data["conditionId"]),
+                            str(data["tokenId"]),
+                            side,
+                            float(data["amountUsd"]),
+                            float(data["price"]),
+                            str(data["walletAddress"]),
+                            str(data["signature"]),
+                        ),
+                    )
+                    row = cur.fetchone()
+                conn.commit()
+
+            created_at = row[1]
+            if isinstance(created_at, datetime):
+                created_at = created_at.isoformat()
+
+            return jsonify(ok=True, mockTradeId=row[0], createdAt=created_at), 200
+        except Exception as e:
+            return jsonify(ok=False, error=str(e)), 500
+
+    @app.route("/api/trades/mock", methods=["GET"])
+    def list_mock_trades():
+        from db import get_connection
+
+        try:
+            wallet = request.args.get("wallet")
+            query = '''
+                SELECT id, created_at, condition_id, token_id, side, amount_usd, price, wallet_address,
+                   signature, market, quantity, entry_price, exit_price, status, pnl, opened_at, closed_at
+                FROM paper_trades
+            '''
+            params = []
+            if wallet:
+                query += " WHERE wallet_address = %s"
+                params.append(wallet)
+            query += " ORDER BY id DESC LIMIT 100"
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(query, params)
+                    rows = cur.fetchall()
+
+            return jsonify(
+                ok=True,
+                data=[
+                    {
+                        "id": r[0],
+                        "createdAt": r[1].isoformat() if isinstance(r[1], datetime) else r[1],
+                        "conditionId": r[2],
+                        "tokenId": str(r[3]),
+                        "side": r[4],
+                        "amountUsd": float(r[5]),
+                        "price": float(r[6]),
+                        "walletAddress": r[7],
+                        "signature": r[8],
+                        "market": r[9],
+                        "quantity": float(r[10]) if r[10] is not None else None,
+                        "entryPrice": float(r[11]) if r[11] is not None else None,
+                        "exitPrice": float(r[12]) if r[12] is not None else None,
+                        "status": r[13],
+                        "pnl": float(r[14]) if r[14] is not None else None,
+                        "openedAt": r[15].isoformat() if r[15] else None,
+                        "closedAt": r[16].isoformat() if r[16] else None,
+                    }
+                    for r in rows
+                ],
+            ), 200
+        except Exception as e:
+            return jsonify(ok=False, error=str(e)), 500
+
     return app
