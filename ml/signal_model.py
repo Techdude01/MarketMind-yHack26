@@ -19,12 +19,12 @@ THRESHOLD = 0.3
 finbert = pipeline(
     "text-classification",
     model="ProsusAI/finbert",
-    return_all_scores=True,
+    top_k=None,
 )
 cardiff = pipeline(
     "text-classification",
     model="cardiffnlp/twitter-roberta-base-sentiment-latest",
-    return_all_scores=True,
+    top_k=None,
 )
 
 
@@ -36,7 +36,13 @@ def get_sentiment_score(summary: str, category: str) -> float:
     else:
         result = cardiff((summary or "")[:512])
 
-    return scores_to_float(result[0])
+    # HF pipelines may return either [[{...}, ...]] or [{...}, ...] depending on version.
+    if isinstance(result, list) and result and isinstance(result[0], list):
+        scores = result[0]
+    else:
+        scores = result
+
+    return scores_to_float(scores)
 
 
 def scores_to_float(scores: list[dict]) -> float:
