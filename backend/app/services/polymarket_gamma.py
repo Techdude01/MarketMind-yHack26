@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -17,6 +18,11 @@ logger = logging.getLogger(__name__)
 
 GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets"
 
+# Ingest: ask Gamma for a large enough pool so post-demo-filter can still fill ``DEMO_MARKETS_TOP_N``.
+GAMMA_POOL_LIMIT = 200
+DEMO_MARKETS_TOP_N = 36
+_MIN_DEMO_VOLUME_NUM = 5_000_000
+
 
 def _utc_today() -> date:
     return datetime.now(timezone.utc).date()
@@ -29,8 +35,8 @@ def _end_date_min_at_least_days_ahead(days: int) -> str:
 
 def fetch_filtered_markets(
     *,
-    limit: int = 36,
-    volume_num_min: int = 10_000_000,
+    limit: int = GAMMA_POOL_LIMIT,
+    volume_num_min: int = _MIN_DEMO_VOLUME_NUM,
     min_days_until_end: int = 2,
     end_date_min: str | None = None,
     end_date_max: str | None = None,
@@ -39,9 +45,9 @@ def fetch_filtered_markets(
     """GET Gamma markets list; returns a list of raw market dicts (ignores events table).
 
     By default, ``end_date_min`` is UTC today + ``min_days_until_end`` days (default **2**),
-    i.e. markets that end at least two days from now—e.g. if today is 28 Mar, that is 30 Mar
-    or later. Combined with ``volume_num_min`` (default **$10M+**). Override with ``end_date_min`` /
-    ``end_date_max`` if needed.
+    i.e. markets that end at least two days from now. ``volume_num_min`` defaults to **$1M+**
+    to match post-fetch demo filters; ``limit`` defaults to a wide pool before
+    ``filter_and_rank_markets_for_demo``. Override with ``end_date_min`` / ``end_date_max`` if needed.
     """
     resolved_min = (
         end_date_min
@@ -96,6 +102,75 @@ def _parse_decimal(v: Any) -> Decimal | None:
         except InvalidOperation:
             return None
     return None
+
+
+def _raw_float(market: dict[str, Any], key: str) -> float | None:
+    """Parse a numeric field from a raw Gamma market dict."""
+    v = market.get(key)
+    if v is None or v == "":
+        return None
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        try:
+            return float(v.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def is_good_market(market: dict[str, Any]) -> bool:
+    """Hard filters for homepage-worthy, tradable markets (pre-upsert)."""
+    if _parse_bool(market.get("active")) is not True:
+        return False
+    if _parse_bool(market.get("closed")) is not False:
+        return False
+    if _parse_bool(market.get("acceptingOrders")) is not True:
+        return False
+    if _parse_bool(market.get("archived")) is not False:
+        return False
+
+    vol = _raw_float(market, "volumeNum")
+    if vol is None or vol < _MIN_DEMO_VOLUME_NUM:
+        return False
+
+    if _raw_float(market, "bestBid") is None:
+        return False
+    if _raw_float(market, "bestAsk") is None:
+        return False
+
+    ltp = _raw_float(market, "lastTradePrice")
+    if ltp is None:
+        return False
+    if not (0.05 <= ltp <= 0.95):
+        return False
+    return True
+
+
+def demo_market_score(market: dict[str, Any]) -> float:
+    """Soft score for ordering demo markets (higher is better)."""
+    vol = _raw_float(market, "volumeNum") or 0.0
+    score = math.log(vol + 1.0)
+    if _parse_bool(market.get("featured")) is True:
+        score += 2.0
+    v24 = _raw_float(market, "volume24hr") or 0.0
+    v1w = _raw_float(market, "volume1wk") or 0.0
+    score += 0.15 * math.log1p(v24)
+    score += 0.1 * math.log1p(v1w)
+    return score
+
+
+def filter_and_rank_markets_for_demo(
+    raw: list[dict[str, Any]],
+    *,
+    top_n: int = DEMO_MARKETS_TOP_N,
+) -> list[dict[str, Any]]:
+    """Apply ``is_good_market``, sort by ``demo_market_score``, return top *top_n*."""
+    candidates = [m for m in raw if is_good_market(m)]
+    candidates.sort(key=demo_market_score, reverse=True)
+    return candidates[:top_n]
 
 
 def _parse_json_array(v: Any) -> list[Any] | None:

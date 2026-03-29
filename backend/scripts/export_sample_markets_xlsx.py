@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export polymarket + Tavily + Gemini rows for fixed sample IDs to a 3-sheet xlsx.
+"""Export polymarket + K2 + Tavily + Gemini rows for fixed sample IDs to a 4-sheet xlsx.
 
 Requires DATABASE_URL and dependencies: pandas, openpyxl.
 
@@ -27,7 +27,7 @@ load_dotenv(os.path.join(os.path.dirname(ROOT), ".env"))
 
 from db import get_connection
 
-DEFAULT_IDS = (559666, 553882, 558960, 553878, 559664)
+DEFAULT_IDS = (553828, 559652)
 
 
 def _excel_safe_datetimes(df) -> None:
@@ -76,7 +76,7 @@ def main() -> None:
     import pandas as pd
 
     parser = argparse.ArgumentParser(
-        description="Export sample polymarket_ids to Excel (3 sheets)."
+        description="Export sample polymarket_ids to Excel (4 sheets)."
     )
     parser.add_argument(
         "-o",
@@ -108,6 +108,11 @@ def main() -> None:
         WHERE polymarket_id IN ({placeholders})
         ORDER BY polymarket_id
     """
+    sql_k2 = f"""
+        SELECT * FROM market_k2_search_queries
+        WHERE polymarket_id IN ({placeholders})
+        ORDER BY polymarket_id, created_at
+    """
     sql_t = f"""
         SELECT * FROM market_tavily_searches
         WHERE polymarket_id IN ({placeholders})
@@ -123,17 +128,20 @@ def main() -> None:
 
     with get_connection() as conn:
         df_pm = _fetch_frame(conn, sql_pm, ids)
+        df_k2 = _fetch_frame(conn, sql_k2, ids)
         df_t = _fetch_frame(conn, sql_t, ids)
         df_g = _fetch_frame(conn, sql_g, ids)
 
     with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
         df_pm.to_excel(writer, sheet_name="polymarket_markets", index=False)
+        df_k2.to_excel(writer, sheet_name="market_k2_search_queries", index=False)
         df_t.to_excel(writer, sheet_name="market_tavily_searches", index=False)
         df_g.to_excel(writer, sheet_name="market_gemini_summaries", index=False)
 
     print(
         f"Wrote {out_path}\n"
         f"  polymarket_markets: {len(df_pm)} rows\n"
+        f"  market_k2_search_queries: {len(df_k2)} rows\n"
         f"  market_tavily_searches: {len(df_t)} rows\n"
         f"  market_gemini_summaries: {len(df_g)} rows\n"
         f"  ids: {ids}"

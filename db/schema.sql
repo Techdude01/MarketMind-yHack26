@@ -63,10 +63,25 @@ CREATE INDEX IF NOT EXISTS idx_markets_active
 CREATE INDEX IF NOT EXISTS idx_markets_end_date
     ON polymarket_markets (end_date);
 
+-- K2-generated search queries per market (feeds Tavily)
+CREATE TABLE IF NOT EXISTS market_k2_search_queries (
+    id BIGSERIAL PRIMARY KEY,
+    polymarket_id BIGINT NOT NULL REFERENCES polymarket_markets (polymarket_id) ON DELETE CASCADE,
+    search_queries JSONB NOT NULL,       -- array of query strings K2 produced
+    raw_k2_response TEXT NOT NULL,       -- full K2 output for debugging / audit
+    model TEXT NOT NULL DEFAULT 'MBZUAI-IFM/K2-Think-v2',
+    num_queries_requested INT NOT NULL DEFAULT 4,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_k2_queries_polymarket_created
+    ON market_k2_search_queries (polymarket_id, created_at DESC);
+
 -- Tavily search runs per Polymarket (append-only history)
 CREATE TABLE IF NOT EXISTS market_tavily_searches (
     id BIGSERIAL PRIMARY KEY,
     polymarket_id BIGINT NOT NULL REFERENCES polymarket_markets (polymarket_id) ON DELETE CASCADE,
+    k2_search_query_id BIGINT REFERENCES market_k2_search_queries (id) ON DELETE SET NULL,
     search_query TEXT NOT NULL,
     results JSONB NOT NULL,
     max_results INT NOT NULL,

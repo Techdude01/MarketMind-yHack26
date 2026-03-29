@@ -1,4 +1,4 @@
-"""Postgres access for Tavily + Gemini research rows — psycopg only."""
+"""Postgres access for K2 search queries, Tavily, and Gemini research rows."""
 
 from __future__ import annotations
 
@@ -6,11 +6,20 @@ from typing import Any
 
 from psycopg.types.json import Json
 
+INSERT_K2_SEARCH_QUERIES_SQL = """
+INSERT INTO market_k2_search_queries (
+    polymarket_id, search_queries, raw_k2_response, model, num_queries_requested
+) VALUES (
+    %(polymarket_id)s, %(search_queries)s, %(raw_k2_response)s, %(model)s, %(num_queries_requested)s
+)
+RETURNING id
+"""
+
 INSERT_TAVILY_SQL = """
 INSERT INTO market_tavily_searches (
-    polymarket_id, search_query, results, max_results
+    polymarket_id, k2_search_query_id, search_query, results, max_results
 ) VALUES (
-    %(polymarket_id)s, %(search_query)s, %(results)s, %(max_results)s
+    %(polymarket_id)s, %(k2_search_query_id)s, %(search_query)s, %(results)s, %(max_results)s
 )
 RETURNING id
 """
@@ -33,6 +42,33 @@ LIMIT %(limit)s
 """
 
 
+def insert_k2_search_queries(
+    conn,
+    *,
+    polymarket_id: int,
+    search_queries: list[str],
+    raw_k2_response: str,
+    model: str = "MBZUAI-IFM/K2-Think-v2",
+    num_queries_requested: int = 4,
+) -> int:
+    """Insert one K2 search-queries row. Returns ``market_k2_search_queries.id``."""
+    with conn.cursor() as cur:
+        cur.execute(
+            INSERT_K2_SEARCH_QUERIES_SQL,
+            {
+                "polymarket_id": polymarket_id,
+                "search_queries": Json(search_queries),
+                "raw_k2_response": raw_k2_response,
+                "model": model,
+                "num_queries_requested": num_queries_requested,
+            },
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise RuntimeError("INSERT market_k2_search_queries returned no id")
+        return int(row[0])
+
+
 def insert_tavily_search(
     conn,
     *,
@@ -40,6 +76,7 @@ def insert_tavily_search(
     search_query: str,
     results: list[dict[str, Any]],
     max_results: int,
+    k2_search_query_id: int | None = None,
 ) -> int:
     """Insert one Tavily search row. Returns ``market_tavily_searches.id``."""
     with conn.cursor() as cur:
@@ -47,6 +84,7 @@ def insert_tavily_search(
             INSERT_TAVILY_SQL,
             {
                 "polymarket_id": polymarket_id,
+                "k2_search_query_id": k2_search_query_id,
                 "search_query": search_query,
                 "results": Json(results),
                 "max_results": max_results,

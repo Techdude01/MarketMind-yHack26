@@ -4,8 +4,14 @@ Uses the MBZUAI-IFM/K2-Think-v2 model via the k2think.ai API,
 which exposes an OpenAI-compatible /chat/completions endpoint.
 """
 
+import json
+import logging
+import re
+
 from openai import OpenAI
 from app.config import Config
+
+logger = logging.getLogger(__name__)
 
 _client: OpenAI | None = None
 
@@ -57,6 +63,112 @@ def reason(market: dict) -> str:
         stream=False,
     )
     return response.choices[0].message.content
+
+
+_SEARCH_QUERY_PROMPT = """\
+You are MarketMind, an AI research strategist for prediction markets.
+
+## Market
+Question: {question}
+Description: {description}
+
+## Task
+Generate {num_queries} highly specific web search queries that will find \
+real-world news articles, expert analyses, data reports, and primary sources \
+relevant to predicting the outcome of this market.
+
+CRITICAL RULES:
+- Do NOT include the market title or question verbatim as a search query.
+- Do NOT generate queries that would return the Polymarket listing page itself.
+- Each query should target a DIFFERENT angle: recent news, historical data, \
+expert opinion, regulatory filings, statistical trends, etc.
+- Queries should be phrased the way a professional researcher would type into \
+Google — short, keyword-rich, no filler words.
+- Return ONLY a JSON array of strings, nothing else. No markdown fences.
+
+Example output:
+["BTC price forecast Q4 2026 analyst consensus", "Bitcoin halving cycle historical returns", "institutional crypto adoption 2025 2026 trends"]
+"""
+
+_DEFAULT_NUM_QUERIES = 4
+_MAX_NUM_QUERIES = 8
+_TAVILY_MAX_QUERY_CHARS = 400
+
+
+def _parse_search_queries(raw: str, fallback_max: int) -> list[str]:
+    """Extract a list of query strings from K2's response.
+
+    Tries JSON first, then falls back to line-by-line extraction.
+    """
+    text = raw.strip()
+
+    # Strip markdown fences if K2 wraps the answer
+    text = re.sub(r"^```(?:json)?\s*", "", text)
+    text = re.sub(r"\s*```$", "", text)
+    text = text.strip()
+
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, list):
+            queries = [str(q).strip() for q in parsed if str(q).strip()]
+            return queries[:fallback_max]
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    # Fallback: extract lines that look like queries
+    lines = [
+        re.sub(r"^\d+[\.\)]\s*", "", line).strip().strip('"').strip("'")
+        for line in text.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    return [l for l in lines if len(l) > 10][:fallback_max]
+
+
+def generate_search_queries(
+    market: dict,
+    num_queries: int = _DEFAULT_NUM_QUERIES,
+) -> list[str]:
+    """Ask K2 to produce targeted search queries for a prediction market.
+
+    Instead of naively searching for the market question (which returns the
+    Polymarket listing page), K2 identifies the underlying topics, entities,
+    and data sources that would inform a probability estimate.
+
+    Args:
+        market: dict with ``question`` and ``description`` keys.
+        num_queries: How many queries to request (capped at 8).
+
+    Returns:
+        A list of search-query strings ready for Tavily.
+    """
+    client = _get_client()
+    num_queries = min(max(num_queries, 1), _MAX_NUM_QUERIES)
+
+    prompt = _SEARCH_QUERY_PROMPT.format(
+        question=market.get("question", "N/A"),
+        description=market.get("description", "N/A"),
+        num_queries=num_queries,
+    )
+
+    response = client.chat.completions.create(
+        model=MODEL,
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=512,
+        stream=False,
+    )
+    raw_text = response.choices[0].message.content or ""
+    queries = _parse_search_queries(raw_text, fallback_max=num_queries)
+
+    if not queries:
+        logger.warning(
+            "K2 returned no parseable search queries for market %r; "
+            "falling back to question-based query",
+            market.get("question", ""),
+        )
+        q = market.get("question", "prediction market")
+        queries = [q]
+
+    return [q[:_TAVILY_MAX_QUERY_CHARS] for q in queries]
 
 
 def chat(message: str, system_prompt: str | None = None) -> str:

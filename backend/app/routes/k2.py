@@ -67,6 +67,73 @@ def k2_reason():
         return jsonify({"error": str(e)}), 500
 
 
+@k2_bp.route("/k2/search-queries", methods=["POST"])
+def k2_search_queries():
+    """
+    Generate targeted Tavily search queries for a prediction market.
+    ---
+    tags:
+      - LLM
+    summary: K2 search-query generation
+    description: >
+      K2 analyses a prediction-market question and generates specific,
+      keyword-rich search queries designed to surface real-world news,
+      expert analysis, and data — NOT the Polymarket listing page itself.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - question
+            properties:
+              question:
+                type: string
+              description:
+                type: string
+              num_queries:
+                type: integer
+                default: 4
+    responses:
+      200:
+        description: Search queries generated.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                queries:
+                  type: array
+                  items:
+                    type: string
+                model:
+                  type: string
+      400:
+        description: Missing question.
+      500:
+        description: K2 API error.
+    """
+    data = request.get_json(silent=True) or {}
+    question = data.get("question")
+    if not question:
+        return jsonify({"error": "Missing required field: question"}), 400
+
+    market = {
+        "question": question,
+        "description": data.get("description", ""),
+    }
+    num_queries = data.get("num_queries", 4)
+
+    try:
+        from app.services.llm import k2 as k2_svc
+
+        queries = k2_svc.generate_search_queries(market, num_queries=num_queries)
+        return jsonify({"queries": queries, "model": k2_svc.MODEL}), 200
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @k2_bp.route("/k2/chat", methods=["POST"])
 def k2_chat():
     """
