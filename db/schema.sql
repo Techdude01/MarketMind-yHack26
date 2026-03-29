@@ -102,5 +102,17 @@ CREATE TABLE IF NOT EXISTS paper_trades (
     price NUMERIC(20, 8) NOT NULL,
 
     wallet_address TEXT NOT NULL,
-    signature TEXT NOT NULL
+    signature TEXT NOT NULL,
+
+    market TEXT,
+    quantity NUMERIC(20, 6),
+    entry_price NUMERIC(20, 8),
+    exit_price NUMERIC(20, 8),
+    status TEXT CHECK (status IN ('OPEN', 'CLOSED')),
+    pnl NUMERIC(20, 8),
+    opened_at TIMESTAMPTZ,
+    closed_at TIMESTAMPTZ
 );
+
+CREATE INDEX IF NOT EXISTS idx_paper_trades_condition_id ON paper_trades(condition_id);
+CREATE INDEX IF NOT EXISTS idx_paper_trades_created_at ON paper_trades(created_at DESC);
