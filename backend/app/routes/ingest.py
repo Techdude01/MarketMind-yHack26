@@ -6,7 +6,12 @@ from typing import Any
 import requests
 from flask import Blueprint, jsonify, request
 
-from app.repositories.market_research import list_markets_for_research
+from app.repositories.homepage_markets import (
+    list_homepage_polymarket_ids,
+    select_homepage_markets,
+    upsert_homepage_selections,
+)
+from app.repositories.market_research import has_analysis, list_markets_for_research
 from app.repositories.polymarket_markets import upsert_markets
 from app.services.analyze import (
     DEFAULT_TAVILY_MAX,
@@ -25,14 +30,15 @@ _MAX_RESEARCH_LIMIT = 200
 
 
 def _ingest_polymarket_gamma_rows() -> (
-    tuple[list[Any], list[dict[str, Any]], int, list[dict[str, Any]]]
-    | tuple[None, None, None, tuple[Any, int]]
+    tuple[list[Any], list[dict[str, Any]], int, list[dict[str, Any]], int]
+    | tuple[None, None, None, tuple[Any, int], None]
 ):
     """
-    Fetch Gamma markets, parse rows, upsert into ``polymarket_markets``.
+    Fetch Gamma markets, parse rows, upsert into ``polymarket_markets``,
+    then select homepage-worthy markets and write to ``homepage_markets``.
 
-    Returns ``(raw, rows, n_ok, row_errors)`` on success.
-    On failure returns ``(None, None, None, (jsonify_response, status))`` — caller should return it.
+    Returns ``(raw, rows, n_ok, row_errors, homepage_selected)`` on success.
+    On failure returns ``(None, None, None, (jsonify_response, status), None)``.
     """
     from db import get_connection
 
@@ -48,36 +54,48 @@ def _ingest_polymarket_gamma_rows() -> (
                 }
             ),
             502,
-        )
+        ), None
     except ValueError as exc:
-        return None, None, None, (jsonify({"error": str(exc), "code": "GAMMA_PARSE"}), 502)
+        return None, None, None, (jsonify({"error": str(exc), "code": "GAMMA_PARSE"}), 502), None
 
     try:
         rows = rows_for_upsert(raw)
     except ValueError as exc:
-        return None, None, None, (jsonify({"error": str(exc), "code": "MARKET_PARSE"}), 400)
+        return None, None, None, (jsonify({"error": str(exc), "code": "MARKET_PARSE"}), 400), None
 
+    homepage_selected = 0
     try:
         with get_connection() as conn:
             n_ok, row_errors = upsert_markets(conn, rows)
+
+            picks = select_homepage_markets(raw)
+            homepage_selected = upsert_homepage_selections(conn, picks)
+            logger.info("Homepage markets selected: %d", homepage_selected)
+
             conn.commit()
     except Exception:
         logger.exception("Upsert failed")
         return None, None, None, (
             jsonify({"error": "Database error during market upsert", "code": "DATABASE_ERROR"}),
             503,
-        )
+        ), None
 
-    return raw, rows, n_ok, row_errors
+    return raw, rows, n_ok, row_errors, homepage_selected
 
 
 @ingest_bp.route("/markets", methods=["POST"])
 def ingest_markets():
     """
-    Fetch filtered markets from Polymarket Gamma and upsert into polymarket_markets.
+    Fetch filtered markets from Polymarket Gamma, upsert into polymarket_markets,
+    and refresh homepage_markets selections.
+    ---
+    tags:
+      - Ingest
+    responses:
+      200:
+        description: Upsert results including homepage selection count
     """
-    out = _ingest_polymarket_gamma_rows()
-    raw, rows, n_ok, row_errors = out
+    raw, rows, n_ok, row_errors, homepage_selected = _ingest_polymarket_gamma_rows()
     if raw is None:
         err_body, status = row_errors  # type: ignore[misc]
         return err_body, status
@@ -95,6 +113,7 @@ def ingest_markets():
             "upserted": n_ok,
             "failed": len(row_errors),
             "errors": row_errors,
+            "homepage_selected": homepage_selected,
             "sample_polymarket_ids": sample_ids,
         }
     ), 200
@@ -119,8 +138,7 @@ def ingest_pipeline():
     raw_tm = request.args.get("tavily_max", default=DEFAULT_TAVILY_MAX, type=int)
     tavily_max = clamp_tavily_max(raw_tm)
 
-    out = _ingest_polymarket_gamma_rows()
-    raw, rows, n_ok, row_errors = out
+    raw, rows, n_ok, row_errors, homepage_selected = _ingest_polymarket_gamma_rows()
     if raw is None:
         err_body, status = row_errors  # type: ignore[misc]
         return err_body, status
@@ -201,6 +219,7 @@ def ingest_pipeline():
             "upserted": n_ok,
             "upsert_failed": len(row_errors),
             "upsert_errors": row_errors,
+            "homepage_selected": homepage_selected,
             "research_limit": limit,
             "tavily_max_results": tavily_max,
             "markets_considered": len(candidates),
@@ -209,5 +228,135 @@ def ingest_pipeline():
             "failed": len(pipeline_errors),
             "errors": pipeline_errors,
             "sample_polymarket_ids": sample_ids,
+        }
+    ), 200
+
+
+@ingest_bp.route("/homepage-pipeline", methods=["POST"])
+def ingest_homepage_pipeline():
+    """
+    Full startup flow: ingest markets, select homepage picks, pre-analyze
+    every homepage market that does not already have a stored thesis.
+
+    Markets with existing analysis are skipped so this is safe to call
+    repeatedly (idempotent warm-up). Pass ``force=true`` to re-analyze all.
+
+    Query params:
+        tavily_max — Tavily tool max_results per market (default 5, max 15)
+        force      — ``true`` to re-analyze even if cached (default false)
+    ---
+    tags:
+      - Ingest
+    summary: Ingest + pre-analyze all homepage markets
+    parameters:
+      - name: tavily_max
+        in: query
+        type: integer
+        default: 5
+      - name: force
+        in: query
+        type: boolean
+        default: false
+    responses:
+      200:
+        description: Ingest + homepage analysis results
+      502:
+        description: Gamma API failure
+      503:
+        description: Database or pipeline error
+    """
+    from db import get_connection
+
+    raw_tm = request.args.get("tavily_max", default=DEFAULT_TAVILY_MAX, type=int)
+    tavily_max = clamp_tavily_max(raw_tm)
+    force = request.args.get("force", "false", type=str).lower() in ("true", "1", "yes")
+
+    # ── Step 1: ingest + homepage selection ───────────────────────────────
+    raw, rows, n_ok, row_errors, homepage_selected = _ingest_polymarket_gamma_rows()
+    if raw is None:
+        err_body, status = row_errors  # type: ignore[misc]
+        return err_body, status
+
+    assert rows is not None and n_ok is not None
+
+    if row_errors:
+        logger.warning(
+            "Homepage-pipeline: upsert partial failures: %d of %d rows",
+            len(row_errors),
+            len(rows),
+        )
+
+    # ── Step 2: analyze each homepage market (skip if already cached) ────
+    analyzed = 0
+    skipped = 0
+    hp_ids: list[int] = []
+    pipeline_errors: list[dict[str, Any]] = []
+
+    try:
+        with get_connection() as conn:
+            hp_ids = list_homepage_polymarket_ids(conn)
+            with conn.cursor() as cur:
+                for i, pid in enumerate(hp_ids):
+                    if not force and has_analysis(conn, pid):
+                        skipped += 1
+                        continue
+
+                    sp = f"hp_{i}"
+                    cur.execute(f"SAVEPOINT {sp}")
+                    try:
+                        run_market_analysis(
+                            conn,
+                            pid,
+                            tavily_max=tavily_max,
+                        )
+                        cur.execute(f"RELEASE SAVEPOINT {sp}")
+                        analyzed += 1
+                    except AnalysisPipelineError as exc:
+                        cur.execute(f"ROLLBACK TO SAVEPOINT {sp}")
+                        logger.warning(
+                            "Homepage-pipeline analysis failed for %s (stage=%s): %s",
+                            pid,
+                            exc.stage,
+                            exc.cause,
+                        )
+                        pipeline_errors.append(
+                            {
+                                "polymarket_id": pid,
+                                "stage": exc.stage,
+                                "error": str(exc.cause),
+                            }
+                        )
+                    except Exception as exc:
+                        cur.execute(f"ROLLBACK TO SAVEPOINT {sp}")
+                        logger.warning(
+                            "Homepage-pipeline analysis failed for %s: %s",
+                            pid,
+                            exc,
+                        )
+                        pipeline_errors.append(
+                            {
+                                "polymarket_id": pid,
+                                "stage": "unknown",
+                                "error": str(exc),
+                            }
+                        )
+            conn.commit()
+    except Exception as exc:
+        logger.exception("Homepage-pipeline database error")
+        return jsonify({"error": str(exc), "code": "DATABASE_ERROR"}), 503
+
+    return jsonify(
+        {
+            "fetched": len(raw),
+            "parsed": len(rows),
+            "upserted": n_ok,
+            "upsert_failed": len(row_errors),
+            "homepage_selected": homepage_selected,
+            "homepage_total": len(hp_ids),
+            "analyzed": analyzed,
+            "skipped_cached": skipped,
+            "failed": len(pipeline_errors),
+            "errors": pipeline_errors,
+            "force": force,
         }
     ), 200

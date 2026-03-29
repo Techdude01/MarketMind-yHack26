@@ -2,6 +2,7 @@
 
 from flask import Blueprint, jsonify, request
 
+from app.repositories.homepage_markets import list_homepage_markets
 from app.repositories.polymarket_markets import get_market_by_id, list_top_markets
 
 markets_bp = Blueprint("markets", __name__)
@@ -39,6 +40,39 @@ def list_markets():
     try:
         with get_connection() as conn:
             markets = list_top_markets(conn, limit=limit)
+    except Exception as exc:
+        return jsonify({"error": str(exc), "code": "DATABASE_ERROR"}), 503
+
+    return jsonify({"markets": markets, "count": len(markets)}), 200
+
+
+@markets_bp.route("/markets/homepage", methods=["GET"])
+def homepage_markets():
+    """
+    Curated homepage-worthy markets (joined from homepage_markets + polymarket_markets).
+    ---
+    tags:
+      - Markets
+    summary: Demo-worthy markets for the homepage
+    description: >
+      Returns the top homepage-selected markets, ranked by demo_score.
+      Data comes from the homepage_markets selection table joined back to
+      polymarket_markets for full market fields.
+      Use optional query param ``limit`` (default 20, max 50).
+    responses:
+      200:
+        description: List of homepage market objects
+      503:
+        description: Database unavailable
+    """
+    from db import get_connection
+
+    raw_limit = request.args.get("limit", 20, type=int)
+    limit = max(1, min(raw_limit or 20, 50))
+
+    try:
+        with get_connection() as conn:
+            markets = list_homepage_markets(conn, limit=limit)
     except Exception as exc:
         return jsonify({"error": str(exc), "code": "DATABASE_ERROR"}), 503
 
