@@ -2,7 +2,7 @@
 
 from flask import Blueprint, jsonify, request
 
-from app.repositories.polymarket_markets import list_top_markets
+from app.repositories.polymarket_markets import get_market_by_id, list_top_markets
 
 markets_bp = Blueprint("markets", __name__)
 
@@ -43,3 +43,39 @@ def list_markets():
         return jsonify({"error": str(exc), "code": "DATABASE_ERROR"}), 503
 
     return jsonify({"markets": markets, "count": len(markets)}), 200
+
+
+@markets_bp.route("/markets/<int:polymarket_id>", methods=["GET"])
+def get_market(polymarket_id: int):
+    """
+    Get a single market by polymarket_id.
+    ---
+    tags:
+      - Markets
+    summary: Full market detail from the database
+    parameters:
+      - name: polymarket_id
+        in: path
+        required: true
+        type: integer
+        description: The Polymarket numeric market ID
+    responses:
+      200:
+        description: Market detail object
+      404:
+        description: Market not found
+      503:
+        description: Database unavailable
+    """
+    from db import get_connection
+
+    try:
+        with get_connection() as conn:
+            market = get_market_by_id(conn, polymarket_id)
+    except Exception as exc:
+        return jsonify({"error": str(exc), "code": "DATABASE_ERROR"}), 503
+
+    if market is None:
+        return jsonify({"error": "Market not found", "code": "NOT_FOUND"}), 404
+
+    return jsonify(market), 200

@@ -16,3 +16,4 @@ backend/.venv/
 .ngrok-postgres.pid
 
 /backend/node_modules
+node_modules
