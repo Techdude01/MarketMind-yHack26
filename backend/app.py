@@ -1,11 +1,20 @@
 import os
+import sys
 from datetime import datetime
+from pathlib import Path
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 from db import get_connection
+
+# Allow importing agent.trader when running backend as a standalone service
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.append(str(PROJECT_ROOT))
+
+from agent.trader import list_mock_trades, process_signed_mock_trade
 
 load_dotenv()
 
@@ -74,11 +83,37 @@ def db_read():
     return jsonify(rows=out)
 
 
+@app.post("/api/trades/mock")
+def mock_trade():
+    try:
+        payload = request.get_json(silent=True) or {}
+        result = process_signed_mock_trade(payload)
+        return jsonify(result), 200
+    except ValueError as e:
+        return jsonify(ok=False, error=str(e)), 400
+    except Exception as e:
+        return jsonify(ok=False, error=str(e)), 500
+
+
+@app.get("/api/trades/mock")
+def get_mock_trades():
+    try:
+        limit = request.args.get("limit", default=100, type=int)
+        result = list_mock_trades(limit=limit)
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify(ok=False, error=str(e)), 500
+
+
 @app.get("/")
 def home():
     return jsonify(status="backend running")
 
 
+@app.get("/__routes")
+def __routes():
+    return jsonify(routes=sorted([str(r) for r in app.url_map.iter_rules()]))
+
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=5001, debug=True)
