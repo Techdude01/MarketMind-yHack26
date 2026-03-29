@@ -1,5 +1,6 @@
 .env
 .brv
+backend/.venv/
 
 # Python cache — all depths
 **/__pycache__/

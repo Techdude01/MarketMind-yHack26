@@ -32,8 +32,9 @@ class Config:
     AUTH0_AUDIENCE = os.getenv("AUTH0_AUDIENCE")
     AUTH0_ALGORITHMS = os.getenv("AUTH0_ALGORITHMS", "RS256")
 
-    # PostgreSQL
-    POSTGRES_URL = os.getenv("POSTGRES_URL")
+    # PostgreSQL (Docker Compose uses DATABASE_URL)
+    DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL")
+    POSTGRES_URL = os.getenv("POSTGRES_URL") or os.getenv("DATABASE_URL")
 
     # MongoDB
     MONGO_URI = os.getenv("MONGO_URI")

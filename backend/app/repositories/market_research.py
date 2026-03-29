@@ -1,0 +1,96 @@
+"""Postgres access for Tavily + Gemini research rows — psycopg only."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from psycopg.types.json import Json
+
+INSERT_TAVILY_SQL = """
+INSERT INTO market_tavily_searches (
+    polymarket_id, search_query, results, max_results
+) VALUES (
+    %(polymarket_id)s, %(search_query)s, %(results)s, %(max_results)s
+)
+RETURNING id
+"""
+
+INSERT_GEMINI_SQL = """
+INSERT INTO market_gemini_summaries (
+    polymarket_id, tavily_search_id, thesis_text, reasoning_input, model
+) VALUES (
+    %(polymarket_id)s, %(tavily_search_id)s, %(thesis_text)s, %(reasoning_input)s, %(model)s
+)
+RETURNING id
+"""
+
+LIST_MARKETS_FOR_RESEARCH_SQL = """
+SELECT polymarket_id, question, description
+FROM polymarket_markets
+WHERE active IS DISTINCT FROM FALSE
+ORDER BY volume_num DESC NULLS LAST
+LIMIT %(limit)s
+"""
+
+
+def insert_tavily_search(
+    conn,
+    *,
+    polymarket_id: int,
+    search_query: str,
+    results: list[dict[str, Any]],
+    max_results: int,
+) -> int:
+    """Insert one Tavily search row. Returns ``market_tavily_searches.id``."""
+    with conn.cursor() as cur:
+        cur.execute(
+            INSERT_TAVILY_SQL,
+            {
+                "polymarket_id": polymarket_id,
+                "search_query": search_query,
+                "results": Json(results),
+                "max_results": max_results,
+            },
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise RuntimeError("INSERT market_tavily_searches returned no id")
+        return int(row[0])
+
+
+def insert_gemini_summary(
+    conn,
+    *,
+    polymarket_id: int,
+    tavily_search_id: int,
+    thesis_text: str,
+    reasoning_input: str,
+    model: str = "gemini-2.5-flash",
+) -> int:
+    """Insert one Gemini summary row. Returns ``market_gemini_summaries.id``."""
+    with conn.cursor() as cur:
+        cur.execute(
+            INSERT_GEMINI_SQL,
+            {
+                "polymarket_id": polymarket_id,
+                "tavily_search_id": tavily_search_id,
+                "thesis_text": thesis_text,
+                "reasoning_input": reasoning_input,
+                "model": model,
+            },
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise RuntimeError("INSERT market_gemini_summaries returned no id")
+        return int(row[0])
+
+
+def list_markets_for_research(conn, *, limit: int) -> list[dict[str, Any]]:
+    """Top markets by ``volume_num`` for the research pipeline."""
+    with conn.cursor() as cur:
+        cur.execute(LIST_MARKETS_FOR_RESEARCH_SQL, {"limit": limit})
+        colnames = [d[0] for d in cur.description]
+        out: list[dict[str, Any]] = []
+        for rec in cur.fetchall():
+            out.append(dict(zip(colnames, rec)))
+    return out
