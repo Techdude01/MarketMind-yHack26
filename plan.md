@@ -1,6 +1,5 @@
 # 🧠 MarketMind — Hackathon Plan
-> AI agent for Polymarket: monitors prediction markets, surfaces reasoning gaps, and visualizes risk + payoff like a TradFi terminal
-
+> AI agent for Polymarket: monitors prediction markets, surfaces reasoning s
 ---
 
 ## 🏆 Prize Targets
@@ -392,5 +391,3 @@ Hour 22–24 │ Polish, demo prep, submission
 - Designate one person as "integration owner" to wire modules together in final hours
 
 ---
-
-*Last updated: kickoff — update this file as decisions are made.*

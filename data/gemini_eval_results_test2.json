@@ -1,0 +1,93 @@
+{
+  "summary": {
+    "rows_processed": 6,
+    "sheet_name": "market_gemini_summaries",
+    "column_mapping": {
+      "summary": "Summary",
+      "market_prob": "Market_prob",
+      "category": "Category"
+    },
+    "category_counts": {
+      "Sports": 5,
+      "Games": 1
+    },
+    "action_counts": {
+      "ACT": 5,
+      "SKIP": 1
+    }
+  },
+  "records": [
+    {
+      "row_number": 2,
+      "summary": "The Colorado Avalanche have a strong chance to win the 2026 Stanley Cup. They have a record of 46 wins, 13 losses, and 10 overtime losses for 106 points, the best record in the NHL. The Motley Fool Sportsbooks list them at plus 280 odds, making them the clear favorites ahead of the Tampa Bay Lightning and Carolina Hurricanes. 24/7 Wall St. Nathan MacKinnon is a Hart Trophy candidate and Cale Makar is a Norris Trophy candidate, giving the team two of the best players in the league. However, analysts warn about the Presidents Trophy curse \u2014 only one of the last five teams to reach 100 points first has made it to the Stanley Cup Finals. The Motley Fool Colorado started the season with just one regulation loss in their first 20 games, going from fifth favorite to clear favorite early in the year. FinancialContent The team is healthy, deep, and well coached entering the playoffs.",
+      "market_prob": 0.2,
+      "category": "Sports",
+      "news_sentiment": 0.7438,
+      "market_sentiment": -0.6,
+      "divergence": 1.3438,
+      "direction": "news_bullish",
+      "action": "ACT",
+      "actionable": true
+    },
+    {
+      "row_number": 3,
+      "summary": "Rockstar Games and Take-Two Interactive have officially delayed *Grand Theft Auto VI* multiple times, with the latest confirmed release date set for **November 19, 2026** (per Rockstar\u2019s November 2025 announcement and Take-Two\u2019s Q3 2026 earnings report). This pushes the launch well beyond the market\u2019s resolution deadline of May 31, 2026, making a \"Yes\" outcome highly unlikely. The current market price of 0.023 (2.3%) reflects this low probability.",
+      "market_prob": 0.023,
+      "category": "Games",
+      "news_sentiment": -0.7055,
+      "market_sentiment": -0.954,
+      "divergence": 0.2485,
+      "direction": "news_bullish",
+      "action": "SKIP",
+      "actionable": false
+    },
+    {
+      "row_number": 4,
+      "summary": "The Los Angeles Clippers face significant challenges to reach the 2026 NBA Finals, with recent reports highlighting defensive strengths but offensive stagnation, injury risks (particularly for Kawhi Leonard), and a lack of elite roster upgrades. While they\u2019ve shown improvement post-trade deadline (3-1 record, +4.7 net rating), analysts label them a \"wild card\" rather than a contender, and their playoff odds remain uncertain. The market price of 0.019 (1.9%) for a YES reflects low expectations, though a small upside exists if key players stay healthy and the team adds scoring depth.",
+      "market_prob": 0.019,
+      "category": "Sports",
+      "news_sentiment": -0.4311,
+      "market_sentiment": -0.962,
+      "divergence": 0.5309,
+      "direction": "news_bullish",
+      "action": "ACT",
+      "actionable": true
+    },
+    {
+      "row_number": 5,
+      "summary": "The Phoenix Suns are currently a mid-tier Western Conference team with a 32-23 record through February 2026, ranked 6th-10th in power rankings. Key factors include Devin Booker\u2019s leadership, a revamped roster under new coach Jordan Ott, and injury concerns for Jalen Green and Dillon Brooks. While they have an 86% playoff probability, analysts project only a modest 38-win season and no deep playoff runs, with no credible path to the 2026 Finals.",
+      "market_prob": 0.006,
+      "category": "Sports",
+      "news_sentiment": 0.0009,
+      "market_sentiment": -0.988,
+      "divergence": 0.9889,
+      "direction": "news_bullish",
+      "action": "ACT",
+      "actionable": true
+    },
+    {
+      "row_number": 6,
+      "summary": "The Atlanta Hawks are currently viewed as longshots to win the 2026 NBA Finals, with odds of +30,000 (0.0033% implied probability) and a market price of 0.006 for YES. Their roster features young talent like Jalen Johnson and Zaccharie Risacher, but key challenges include the departure of Trae Young, inconsistent defense (24th in 2-point defense), and reliance on health for Kristaps Porzi\u0146\u0123is. Analysts note the team\u2019s potential for growth but emphasize their lack of star power and playoff experience compared to Eastern Conference rivals like the Celtics and Cavaliers.",
+      "market_prob": 0.006,
+      "category": "Sports",
+      "news_sentiment": 0.2083,
+      "market_sentiment": -0.988,
+      "divergence": 1.1963,
+      "direction": "news_bullish",
+      "action": "ACT",
+      "actionable": true
+    },
+    {
+      "row_number": 7,
+      "summary": "Paraguay has qualified for the 2026 FIFA World Cup after a 16-year absence, finishing 6th in CONMEBOL qualifying (14 goals scored, 10 conceded). Their best historical result is a 2010 quarterfinal exit, and they are currently ranked 39th by FIFA. The expanded 48-team format guarantees six CONMEBOL teams direct qualification, but Paraguay\u2019s group (USA, Australia, UEFA playoff winner) is projected to be competitive. Experts label them a \u201cdark horse spoiler\u201d rather than a title contender, with no evidence of elite-level performance in recent cycles.",
+      "market_prob": 0.005,
+      "category": "Sports",
+      "news_sentiment": 0.427,
+      "market_sentiment": -0.99,
+      "divergence": 1.417,
+      "direction": "news_bullish",
+      "action": "ACT",
+      "actionable": true
+    }
+  ]
+}

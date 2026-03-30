@@ -1,0 +1,19 @@
+.env
+.brv
+backend/.venv/
+
+# Python cache — all depths
+**/__pycache__/
+**/*.py[cod]
+
+# Pytest cache — all depths
+**/.pytest_cache/
+
+.DS_Store
+/backend/.DS_Store
+/frontend/.DS_Store
+.ngrok-postgres.log
+.ngrok-postgres.pid
+
+/backend/node_modules
+node_modules
